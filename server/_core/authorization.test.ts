@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { User } from "../../drizzle/schema";
-import { canBootstrapInitialAdmin, canTransitionSellerApplication, hasCapability, requireCapability, requireOwnership, requireRole } from "./authorization";
+import { canAccessSellerFulfillment, canBootstrapInitialAdmin, canTransitionSellerApplication, hasCapability, requireCapability, requireOwnership, requireRole } from "./authorization";
 
 function user(role: User["role"]): User {
   const now = new Date();
@@ -49,6 +49,14 @@ describe("account authorization", () => {
   it("requires resource ownership for individual seller data", () => {
     expect(() => requireOwnership(21, 22)).toThrow("You do not have permission for this resource");
     expect(() => requireOwnership(21, 21)).not.toThrow();
+  });
+
+  it("keeps fulfillment access for suspended sellers without granting it to other roles", () => {
+    expect(canAccessSellerFulfillment("seller", "approved")).toBe(true);
+    expect(canAccessSellerFulfillment("customer", "suspended")).toBe(true);
+    expect(canAccessSellerFulfillment("customer", null)).toBe(false);
+    expect(canAccessSellerFulfillment("staff", "suspended")).toBe(false);
+    expect(canAccessSellerFulfillment("admin", "suspended")).toBe(false);
   });
 
   it("bootstraps only the configured first owner identity, once and before another admin exists", () => {

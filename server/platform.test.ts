@@ -9,10 +9,10 @@ import { COOKIE_NAME } from "../shared/const";
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 describe("current platform integration", () => {
   it("exposes only named public runtime configuration", () => {
-    const env = { MANUS_PROJECT_ID: "project-test", MANUS_API_KEY: "server-only-test", MANUS_JWT_SECRET: "signing-only-test", DATABASE_URL: "db-only-test", MANUS_API_BROWSER_KEY: "public-browser-test", MANUS_ANALYTICS_ENDPOINT: "https://analytics.example", MANUS_ANALYTICS_WEBSITE_ID: "site-test" };
-    expect(publicPlatformConfig(env)).toMatchObject({ projectId: "project-test", apiBrowserKey: "public-browser-test" });
+    const env = { MANUS_PROJECT_ID: "project-test", MANUS_API_KEY: "server-only-test", MANUS_JWT_SECRET: "signing-only-test", DATABASE_URL: "db-only-test", MANUS_API_BROWSER_KEY: "public-browser-test", MANUS_OAUTH_PORTAL_URL: "https://login.example", MANUS_OAUTH_API_URL: "https://oauth-api.example", MANUS_ANALYTICS_ENDPOINT: "https://analytics.example", MANUS_ANALYTICS_WEBSITE_ID: "site-test" };
+    expect(publicPlatformConfig(env)).toMatchObject({ projectId: "project-test", apiBrowserKey: "public-browser-test", oauthPortalUrl: "https://login.example" });
     const script = publicPlatformScript(env);
-    for (const value of [env.MANUS_API_KEY, env.MANUS_JWT_SECRET, env.DATABASE_URL]) expect(script).not.toContain(value);
+    for (const value of [env.MANUS_API_KEY, env.MANUS_JWT_SECRET, env.DATABASE_URL, env.MANUS_OAUTH_API_URL]) expect(script).not.toContain(value);
     const appended: unknown[] = [];
     const fakeDocument = { createElement: () => ({ setAttribute() {} }), head: { appendChild: (node: unknown) => appended.push(node) } };
     new Function("window", "document", script)({}, fakeDocument);
@@ -39,9 +39,11 @@ describe("current platform integration", () => {
     expect(request).toHaveBeenCalledTimes(4);
     expect(JSON.parse(request.mock.calls[0][1].body)).toHaveProperty("originalImages");
   });
-  it("uses a distinct secure app cookie behind the HTTPS Preview proxy", () => {
+  it("uses cross-site Secure cookies for HTTPS and compatible cookies for localhost HTTP", () => {
     expect(COOKIE_NAME).not.toBe("app_session_id");
-    expect(getSessionCookieOptions({ protocol: "http", headers: {} } as never)).toMatchObject({ secure: true, httpOnly: true, sameSite: "none" });
+    expect(getSessionCookieOptions({ protocol: "https", headers: {} } as never)).toMatchObject({ secure: true, httpOnly: true, sameSite: "none" });
+    expect(getSessionCookieOptions({ protocol: "http", headers: {} } as never)).toMatchObject({ secure: false, httpOnly: true, sameSite: "lax" });
+    expect(getSessionCookieOptions({ protocol: "http", headers: { "x-forwarded-proto": "https" } } as never)).toMatchObject({ secure: true, httpOnly: true, sameSite: "none" });
   });
   it("binds signed app sessions to this project and accepts an empty display name", async () => {
     vi.stubEnv("MANUS_PROJECT_ID", "project-test");

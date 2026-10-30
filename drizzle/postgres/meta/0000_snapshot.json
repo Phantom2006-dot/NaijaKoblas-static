@@ -1,5 +1,5 @@
 {
-  "id": "58771d6a-ee61-47a3-a8b2-1f3178a14be4",
+  "id": "19af1986-27cc-4850-a2da-781f8f9b4c6f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -295,13 +295,13 @@
           "name": "productId",
           "type": "varchar(64)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "sellerUserId": {
           "name": "sellerUserId",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "nameSnapshot": {
           "name": "nameSnapshot",
@@ -338,6 +338,39 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "fulfillmentStatus": {
+          "name": "fulfillmentStatus",
+          "type": "order_item_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'unfulfilled'"
+        },
+        "carrier": {
+          "name": "carrier",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "trackingNumber": {
+          "name": "trackingNumber",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fulfilledAt": {
+          "name": "fulfilledAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         }
       },
       "indexes": {
@@ -402,7 +435,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "orderItems_sellerUserId_users_id_fk": {
@@ -415,7 +448,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -454,6 +487,12 @@
         },
         "idempotencyKey": {
           "name": "idempotencyKey",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotencyFingerprint": {
+          "name": "idempotencyFingerprint",
           "type": "varchar(64)",
           "primaryKey": false,
           "notNull": true
@@ -644,6 +683,10 @@
         "orders_totals_consistent": {
           "name": "orders_totals_consistent",
           "value": "\"orders\".\"subtotalKobo\" >= 0 AND \"orders\".\"shippingKobo\" >= 0 AND \"orders\".\"totalKobo\" = \"orders\".\"subtotalKobo\" + \"orders\".\"shippingKobo\""
+        },
+        "orders_ngn_currency": {
+          "name": "orders_ngn_currency",
+          "value": "\"orders\".\"currency\" = 'NGN'"
         }
       },
       "isRLSEnabled": false
@@ -733,8 +776,8 @@
         }
       },
       "indexes": {
-        "paymentTransactions_order_idx": {
-          "name": "paymentTransactions_order_idx",
+        "paymentTransactions_order_unique": {
+          "name": "paymentTransactions_order_unique",
           "columns": [
             {
               "expression": "orderId",
@@ -743,7 +786,65 @@
               "nulls": "last"
             }
           ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "paymentTransactions_status_createdAt_idx": {
+          "name": "paymentTransactions_status_createdAt_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "createdAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "paymentTransactions_status_id_idx": {
+          "name": "paymentTransactions_status_id_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "paymentTransactions_providerTransactionId_unique": {
+          "name": "paymentTransactions_providerTransactionId_unique",
+          "columns": [
+            {
+              "expression": "providerTransactionId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"paymentTransactions\".\"providerTransactionId\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -760,7 +861,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -779,6 +880,10 @@
         "paymentTransactions_positive_amount": {
           "name": "paymentTransactions_positive_amount",
           "value": "\"paymentTransactions\".\"amountKobo\" > 0"
+        },
+        "paymentTransactions_ngn_currency": {
+          "name": "paymentTransactions_ngn_currency",
+          "value": "\"paymentTransactions\".\"currency\" = 'NGN'"
         }
       },
       "isRLSEnabled": false
@@ -1100,7 +1205,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -1313,12 +1418,23 @@
         "express"
       ]
     },
+    "public.order_item_status": {
+      "name": "order_item_status",
+      "schema": "public",
+      "values": [
+        "unfulfilled",
+        "processing",
+        "shipped",
+        "fulfilled"
+      ]
+    },
     "public.order_status": {
       "name": "order_status",
       "schema": "public",
       "values": [
         "pending_payment",
         "paid",
+        "partially_fulfilled",
         "payment_failed",
         "cancelled",
         "fulfilled"

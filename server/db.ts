@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, gt, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -20,7 +20,16 @@ import {
 } from "../drizzle/schema";
 import { canBootstrapInitialAdmin, canTransitionSellerApplication } from "./_core/authorization";
 import { ENV } from "./_core/env";
+import { canTransitionFulfillment, deriveFulfillmentOrderStatus, type FulfillmentStatus } from "./commerce/fulfillment";
+import { checkoutFingerprint } from "./commerce/idempotency";
 import { calculateCheckoutAmounts } from "./commerce/pricing";
+
+function hasPostgresConstraint(error: unknown, constraint: string, seen = new Set<object>()): boolean {
+  if (!error || typeof error !== "object" || seen.has(error)) return false;
+  seen.add(error);
+  const candidate = error as { constraint?: unknown; cause?: unknown };
+  return candidate.constraint === constraint || hasPostgresConstraint(candidate.cause, constraint, seen);
+}
 
 let _pool: Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -53,6 +62,46 @@ async function requireDb() {
   const database = await getDb();
   if (!database) throw new Error("Database is not available");
   return database;
+}
+
+type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+
+async function findExistingPendingCheckout(
+  database: Database,
+  customerUserId: number,
+  idempotencyKey: string,
+  fingerprint: string,
+) {
+  const previous = await database.select({ order: orders, payment: paymentTransactions })
+    .from(orders).innerJoin(paymentTransactions, eq(paymentTransactions.orderId, orders.id))
+    .where(and(
+      eq(orders.customerUserId, customerUserId),
+      eq(orders.idempotencyKey, idempotencyKey),
+    )).limit(1);
+  const record = previous[0];
+  if (!record) return undefined;
+  if (record.order.idempotencyFingerprint !== fingerprint) {
+    throw new CommerceValidationError("This idempotency key was already used for a different checkout. Start a new checkout attempt.");
+  }
+  if (record.order.status !== "pending_payment" || record.payment.status !== "pending") {
+    throw new CommerceValidationError("This checkout attempt is no longer active. Start a new checkout attempt.");
+  }
+  return {
+    order: record.order,
+    paymentReference: record.payment.reference,
+    authorizationUrl: record.payment.checkoutUrl,
+    existing: true as const,
+  };
+}
+
+function isIdempotencyUniqueViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth += 1) {
+    const candidate = current as { code?: unknown; constraint?: unknown; cause?: unknown };
+    if (candidate.code === "23505" && candidate.constraint === "orders_customer_idempotency_unique") return true;
+    current = candidate.cause;
+  }
+  return false;
 }
 
 /**
@@ -132,6 +181,27 @@ export async function listUsersForAdmin() {
     createdAt: users.createdAt,
     lastSignedIn: users.lastSignedIn,
   }).from(users).orderBy(desc(users.createdAt)).limit(200);
+}
+
+export async function listPendingPaymentsForAdmin(input: { afterId?: number; limit?: number } = {}) {
+  const database = await requireDb();
+  const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
+  const rows = await database.select({
+    id: paymentTransactions.id,
+    reference: paymentTransactions.reference,
+    orderReference: orders.reference,
+    amountKobo: paymentTransactions.amountKobo,
+    currency: paymentTransactions.currency,
+    createdAt: paymentTransactions.createdAt,
+  }).from(paymentTransactions).innerJoin(orders, eq(paymentTransactions.orderId, orders.id))
+    .where(and(
+      eq(paymentTransactions.status, "pending"),
+      eq(orders.status, "pending_payment"),
+      ...(input.afterId === undefined ? [] : [gt(paymentTransactions.id, input.afterId)]),
+    )).orderBy(asc(paymentTransactions.id)).limit(limit + 1);
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit);
+  return { items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
 }
 
 export type SellerApplicationInput = {
@@ -356,26 +426,43 @@ export async function updateSellerProduct(input: {
   changes: Partial<SellerProductInput> & { status?: "draft" | "published" | "archived" };
 }) {
   const database = await requireDb();
-  if (input.changes.status === "published") {
-    const existing = await database.select({ inventoryCount: sellerProducts.inventoryCount })
-      .from(sellerProducts).where(and(
+  return database.transaction(async tx => {
+    const existing = await tx.select().from(sellerProducts).where(and(
         eq(sellerProducts.id, input.productId),
         eq(sellerProducts.sellerUserId, input.sellerUserId),
-      )).limit(1);
+      )).limit(1).for("update");
     if (!existing.length) return undefined;
-    const available = input.changes.inventoryCount ?? existing[0]!.inventoryCount;
-    const store = await getSellerStoreByUserId(input.sellerUserId);
-    if (!store?.isActive) throw new CommerceValidationError("The seller store is not active.");
-    if (available < 1) throw new CommerceValidationError("A listing needs available stock before it can be published.");
-  }
-  const result = await database.update(sellerProducts).set({
-    ...input.changes,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(sellerProducts.id, input.productId),
-    eq(sellerProducts.sellerUserId, input.sellerUserId),
-  )).returning();
-  return result[0];
+
+    if (input.changes.inventoryCount !== undefined) {
+      const pendingReservations = await tx.select({ itemId: orderItems.id })
+        .from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.id))
+        .where(and(
+          eq(orderItems.productId, input.productId),
+          eq(orders.status, "pending_payment"),
+        )).limit(1);
+      if (pendingReservations.length) {
+        throw new CommerceValidationError("Inventory cannot be edited while customers have pending payment reservations for this listing.");
+      }
+    }
+
+    if (input.changes.status === "published") {
+      const available = input.changes.inventoryCount ?? existing[0]!.inventoryCount;
+      const stores = await tx.select().from(sellerStores)
+        .where(eq(sellerStores.userId, input.sellerUserId)).limit(1).for("update");
+      const store = stores[0];
+      if (!store?.isActive) throw new CommerceValidationError("The seller store is not active.");
+      if (available < 1) throw new CommerceValidationError("A listing needs available stock before it can be published.");
+    }
+
+    const result = await tx.update(sellerProducts).set({
+      ...input.changes,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(sellerProducts.id, input.productId),
+      eq(sellerProducts.sellerUserId, input.sellerUserId),
+    )).returning();
+    return result[0];
+  });
 }
 
 export async function listPublicSellerProducts() {
@@ -388,6 +475,7 @@ export async function listPublicSellerProducts() {
     priceKobo: sellerProducts.priceKobo,
     imageUrl: sellerProducts.imageUrl,
     sizes: sellerProducts.sizes,
+    inventoryCount: sellerProducts.inventoryCount,
     maker: sellerStores.displayName,
     city: sellerStores.city,
   })
@@ -409,23 +497,9 @@ export type CreateOrderInput = CustomerProfileInput & {
 /** Prices, seller ownership, inventory, shipping, and snapshots are resolved server-side. */
 export async function createPendingOrder(customerUserId: number, input: CreateOrderInput) {
   const database = await requireDb();
-  const previous = await database.select({ order: orders, payment: paymentTransactions })
-    .from(orders).innerJoin(paymentTransactions, eq(paymentTransactions.orderId, orders.id))
-    .where(and(
-      eq(orders.customerUserId, customerUserId),
-      eq(orders.idempotencyKey, input.idempotencyKey),
-    )).limit(1);
-  if (previous[0]) {
-    if (previous[0].order.status !== "pending_payment" || previous[0].payment.status !== "pending") {
-      throw new CommerceValidationError("This checkout attempt is no longer active. Start a new checkout attempt.");
-    }
-    return {
-      order: previous[0].order,
-      paymentReference: previous[0].payment.reference,
-      authorizationUrl: previous[0].payment.checkoutUrl,
-      existing: true as const,
-    };
-  }
+  const fingerprint = checkoutFingerprint(input);
+  const previous = await findExistingPendingCheckout(database, customerUserId, input.idempotencyKey, fingerprint);
+  if (previous) return previous;
   const grouped = new Map<string, CheckoutItemInput>();
   for (const line of input.items) {
     const key = `${line.productId}\u0000${line.size}`;
@@ -438,7 +512,8 @@ export async function createPendingOrder(customerUserId: number, input: CreateOr
   }
   const productIds = [...new Set(requested.map(line => line.productId))];
 
-  return database.transaction(async tx => {
+  try {
+    return await database.transaction(async tx => {
     const catalogRows = await tx.select().from(sellerProducts)
       .where(inArray(sellerProducts.id, productIds)).for("update");
     const productsById = new Map(catalogRows.map(product => [product.id, product]));
@@ -510,6 +585,7 @@ export async function createPendingOrder(customerUserId: number, input: CreateOr
       reference,
       customerUserId,
       idempotencyKey: input.idempotencyKey,
+      idempotencyFingerprint: fingerprint,
       status: "pending_payment",
       currency: "NGN",
       firstName: input.firstName,
@@ -550,27 +626,53 @@ export async function createPendingOrder(customerUserId: number, input: CreateOr
       metadata: { orderReference: reference, lineCount: orderLines.length, totalKobo },
     });
     return { order, paymentReference: reference, authorizationUrl: null, existing: false as const };
-  });
+    });
+  } catch (error) {
+    if (!isIdempotencyUniqueViolation(error)) throw error;
+    const concurrent = await findExistingPendingCheckout(database, customerUserId, input.idempotencyKey, fingerprint);
+    if (!concurrent) throw error;
+    return concurrent;
+  }
 }
 
-export async function savePaymentCheckoutUrl(reference: string, checkoutUrl: string) {
+export async function getOrderItemsForCheckout(orderId: number) {
   const database = await requireDb();
-  const result = await database.update(paymentTransactions).set({ checkoutUrl, updatedAt: new Date() })
-    .where(and(eq(paymentTransactions.reference, reference), eq(paymentTransactions.status, "pending")))
+  return database.select().from(orderItems).where(eq(orderItems.orderId, orderId)).orderBy(orderItems.id);
+}
+
+export async function savePaystackCheckoutUrl(input: {
+  reference: string;
+  checkoutUrl: string;
+}) {
+  const database = await requireDb();
+  const result = await database.update(paymentTransactions).set({
+    checkoutUrl: input.checkoutUrl,
+    updatedAt: new Date(),
+  })
+    .where(and(eq(paymentTransactions.reference, input.reference), eq(paymentTransactions.status, "pending")))
     .returning({ id: paymentTransactions.id });
   return result.length === 1;
 }
 
 export async function listCustomerOrders(customerUserId: number) {
   const database = await requireDb();
-  const customerOrders = await database.select().from(orders)
+  const customerOrders = await database.select({
+    order: orders,
+    paymentStatus: paymentTransactions.status,
+    checkoutUrl: paymentTransactions.checkoutUrl,
+  }).from(orders).innerJoin(paymentTransactions, eq(paymentTransactions.orderId, orders.id))
     .where(eq(orders.customerUserId, customerUserId)).orderBy(desc(orders.createdAt)).limit(100);
   if (!customerOrders.length) return [];
-  const ids = customerOrders.map(order => order.id);
+  const ids = customerOrders.map(record => record.order.id);
   const items = await database.select().from(orderItems).where(inArray(orderItems.orderId, ids));
   const itemsByOrder = new Map<number, typeof items>();
   for (const item of items) itemsByOrder.set(item.orderId, [...(itemsByOrder.get(item.orderId) ?? []), item]);
-  return customerOrders.map(order => ({ ...order, items: itemsByOrder.get(order.id) ?? [] }));
+  return customerOrders.map(({ order, paymentStatus, checkoutUrl }) => ({
+    ...order,
+    paymentStatus,
+    checkoutUrl: paymentStatus === "pending" ? checkoutUrl : null,
+    items: itemsByOrder.get(order.id) ?? [],
+  }));
 }
 
 export async function getCustomerOrder(customerUserId: number, reference: string) {
@@ -587,20 +689,30 @@ export async function getPaymentForCustomer(customerUserId: number, reference: s
   return result[0];
 }
 
+export async function getPaymentByReference(reference: string) {
+  const database = await requireDb();
+  const result = await database.select({ payment: paymentTransactions, order: orders })
+    .from(paymentTransactions).innerJoin(orders, eq(paymentTransactions.orderId, orders.id))
+    .where(eq(paymentTransactions.reference, reference)).limit(1);
+  return result[0];
+}
+
 export async function markPaymentSucceeded(input: {
   reference: string;
   amountKobo: number;
   currency: string;
   providerTransactionId?: string;
+  actorUserId?: number;
 }) {
   const database = await requireDb();
-  return database.transaction(async tx => {
+  try {
+    return await database.transaction(async tx => {
     const records = await tx.select({ payment: paymentTransactions, order: orders })
       .from(paymentTransactions).innerJoin(orders, eq(paymentTransactions.orderId, orders.id))
-      .where(eq(paymentTransactions.reference, input.reference)).limit(1);
+      .where(eq(paymentTransactions.reference, input.reference)).limit(1).for("update");
     const record = records[0];
     if (!record) return { success: false as const, reason: "not_found" as const };
-    if (record.payment.status === "succeeded" && record.order.status === "paid") return { success: true as const, alreadyProcessed: true };
+    if (record.payment.status === "succeeded" && ["paid", "partially_fulfilled", "fulfilled"].includes(record.order.status)) return { success: true as const, alreadyProcessed: true };
     if (record.payment.status !== "pending" || record.order.status !== "pending_payment") {
       return { success: false as const, reason: "not_pending" as const };
     }
@@ -613,6 +725,13 @@ export async function markPaymentSucceeded(input: {
     ) {
       return { success: false as const, reason: "amount_mismatch" as const };
     }
+    if (input.providerTransactionId) {
+      const priorUses = await tx.select({ id: paymentTransactions.id }).from(paymentTransactions)
+        .where(eq(paymentTransactions.providerTransactionId, input.providerTransactionId)).limit(1);
+      if (priorUses[0] && priorUses[0].id !== record.payment.id) {
+        return { success: false as const, reason: "provider_transaction_reused" as const };
+      }
+    }
     const changed = await tx.update(paymentTransactions).set({
       status: "succeeded",
       providerTransactionId: input.providerTransactionId ?? null,
@@ -621,24 +740,37 @@ export async function markPaymentSucceeded(input: {
     }).where(and(eq(paymentTransactions.id, record.payment.id), eq(paymentTransactions.status, "pending")))
       .returning({ id: paymentTransactions.id });
     if (changed.length !== 1) return { success: false as const, reason: "not_pending" as const };
-    await tx.update(orders).set({ status: "paid", updatedAt: new Date() })
-      .where(and(eq(orders.id, record.order.id), eq(orders.status, "pending_payment")));
+    const orderChanged = await tx.update(orders).set({ status: "paid", updatedAt: new Date() })
+      .where(and(eq(orders.id, record.order.id), eq(orders.status, "pending_payment")))
+      .returning({ id: orders.id });
+    if (orderChanged.length !== 1) throw new Error("Payment succeeded but the order status transition failed.");
     await tx.insert(accountAuditEvents).values({
-      actorUserId: null,
+      actorUserId: input.actorUserId ?? null,
       targetUserId: record.order.customerUserId,
       eventType: "payment_verified",
-      metadata: { orderReference: record.order.reference, provider: "paystack" },
+      metadata: {
+        orderReference: record.order.reference,
+        provider: "paystack",
+        paymentReference: record.payment.reference,
+        source: input.actorUserId ? "admin_reconciliation" : "provider_verification",
+      },
     });
     return { success: true as const, alreadyProcessed: false };
-  });
+    });
+  } catch (error) {
+    if (hasPostgresConstraint(error, "paymentTransactions_providerTransactionId_unique")) {
+      return { success: false as const, reason: "provider_transaction_reused" as const };
+    }
+    throw error;
+  }
 }
 
-export async function markPaymentFailed(reference: string) {
+export async function markPaymentFailed(reference: string, actorUserId?: number) {
   const database = await requireDb();
   return database.transaction(async tx => {
     const records = await tx.select({ payment: paymentTransactions, order: orders })
       .from(paymentTransactions).innerJoin(orders, eq(paymentTransactions.orderId, orders.id))
-      .where(eq(paymentTransactions.reference, reference)).limit(1);
+      .where(eq(paymentTransactions.reference, reference)).limit(1).for("update");
     const record = records[0];
     if (!record || record.payment.status !== "pending" || record.order.status !== "pending_payment") return false;
     const changed = await tx.update(paymentTransactions).set({ status: "failed", updatedAt: new Date() })
@@ -654,13 +786,19 @@ export async function markPaymentFailed(reference: string) {
         }).where(eq(sellerProducts.id, line.productId));
       }
     }
-    await tx.update(orders).set({ status: "payment_failed", updatedAt: new Date() })
-      .where(and(eq(orders.id, record.order.id), eq(orders.status, "pending_payment")));
+    const orderChanged = await tx.update(orders).set({ status: "payment_failed", updatedAt: new Date() })
+      .where(and(eq(orders.id, record.order.id), eq(orders.status, "pending_payment")))
+      .returning({ id: orders.id });
+    if (orderChanged.length !== 1) throw new Error("Payment failure could not be applied to the pending order.");
     await tx.insert(accountAuditEvents).values({
-      actorUserId: null,
+      actorUserId: actorUserId ?? null,
       targetUserId: record.order.customerUserId,
       eventType: "payment_failed_stock_released",
-      metadata: { orderReference: record.order.reference, provider: "paystack" },
+      metadata: {
+        orderReference: record.order.reference,
+        provider: "paystack",
+        source: actorUserId ? "admin_reconciliation" : "provider_verification",
+      },
     });
     return true;
   });
@@ -668,11 +806,93 @@ export async function markPaymentFailed(reference: string) {
 
 export async function listOrdersForSeller(sellerUserId: number) {
   const database = await requireDb();
-  return database.select({ order: orders, item: orderItems })
+  return database.select({
+    order: {
+      id: orders.id,
+      reference: orders.reference,
+      status: orders.status,
+      firstName: orders.firstName,
+      lastName: orders.lastName,
+      phone: orders.phone,
+      address: orders.address,
+      city: orders.city,
+      deliveryMethod: orders.deliveryMethod,
+      createdAt: orders.createdAt,
+    },
+    item: orderItems,
+  })
     .from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.id))
     .where(and(
       eq(orderItems.sellerUserId, sellerUserId),
-      inArray(orders.status, ["paid", "fulfilled"]),
+      inArray(orders.status, ["paid", "partially_fulfilled", "fulfilled"]),
     ))
     .orderBy(desc(orders.createdAt)).limit(200);
+}
+
+export async function updateSellerOrderItemFulfillment(input: {
+  sellerUserId: number;
+  orderItemId: number;
+  status: FulfillmentStatus;
+  carrier?: string | null;
+  trackingNumber?: string | null;
+}) {
+  const database = await requireDb();
+  return database.transaction(async tx => {
+    const records = await tx.select({ item: orderItems, order: orders })
+      .from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.id))
+      .where(and(
+        eq(orderItems.id, input.orderItemId),
+        eq(orderItems.sellerUserId, input.sellerUserId),
+      )).limit(1).for("update");
+    const record = records[0];
+    if (!record) return { success: false as const, reason: "not_found" as const };
+    if (!["paid", "partially_fulfilled", "fulfilled"].includes(record.order.status)) {
+      return { success: false as const, reason: "order_not_fulfillable" as const };
+    }
+    if (!canTransitionFulfillment(record.item.fulfillmentStatus, input.status)) {
+      return { success: false as const, reason: "invalid_transition" as const };
+    }
+
+    const now = new Date();
+    const update: Partial<typeof orderItems.$inferInsert> = {
+      fulfillmentStatus: input.status,
+      updatedAt: now,
+      ...(input.carrier === undefined ? {} : { carrier: input.carrier }),
+      ...(input.trackingNumber === undefined ? {} : { trackingNumber: input.trackingNumber }),
+      ...(input.status === "fulfilled" ? { fulfilledAt: record.item.fulfilledAt ?? now } : {}),
+    };
+    const changedItems = await tx.update(orderItems).set(update)
+      .where(and(
+        eq(orderItems.id, input.orderItemId),
+        eq(orderItems.sellerUserId, input.sellerUserId),
+      )).returning();
+    const updatedItem = changedItems[0];
+    if (!updatedItem) throw new Error("Seller fulfillment update lost its item lock.");
+
+    const siblingItems = await tx.select({ id: orderItems.id, status: orderItems.fulfillmentStatus })
+      .from(orderItems).where(eq(orderItems.orderId, record.order.id));
+    const statuses = siblingItems.map(item => item.id === updatedItem.id ? updatedItem.fulfillmentStatus : item.status);
+    const nextOrderStatus = deriveFulfillmentOrderStatus(statuses);
+    if (nextOrderStatus !== record.order.status) {
+      const changedOrder = await tx.update(orders).set({ status: nextOrderStatus, updatedAt: now })
+        .where(and(
+          eq(orders.id, record.order.id),
+          inArray(orders.status, ["paid", "partially_fulfilled", "fulfilled"]),
+        )).returning({ id: orders.id });
+      if (changedOrder.length !== 1) throw new Error("Order fulfillment status changed concurrently.");
+    }
+    await tx.insert(accountAuditEvents).values({
+      actorUserId: input.sellerUserId,
+      targetUserId: record.order.customerUserId,
+      eventType: "seller_order_item_fulfillment_updated",
+      metadata: {
+        orderReference: record.order.reference,
+        orderItemId: updatedItem.id,
+        fulfillmentStatus: input.status,
+        carrier: updatedItem.carrier,
+        trackingNumber: updatedItem.trackingNumber,
+      },
+    });
+    return { success: true as const, item: updatedItem, orderStatus: nextOrderStatus };
+  });
 }

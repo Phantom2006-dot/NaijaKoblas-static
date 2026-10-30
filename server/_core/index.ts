@@ -8,20 +8,41 @@ import { registerPaymentRoutes } from "../payments/routes";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { ENV } from "./env";
 
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  // Configure body parser with larger size limit for file uploads
+  const appOrigin = ENV.appBaseUrl ? new URL(ENV.appBaseUrl).origin : null;
+  app.use((req, res, next) => {
+    const origin = req.get("origin");
+    if (origin && appOrigin && origin !== appOrigin) {
+      res.status(403).json({ error: "Origin is not allowed." });
+      return;
+    }
+    if (origin && appOrigin && origin === appOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+      res.setHeader("Access-Control-Max-Age", "600");
+      res.vary("Origin");
+    }
+    if (req.method === "OPTIONS") {
+      res.sendStatus(origin && appOrigin === origin ? 204 : 403);
+      return;
+    }
+    next();
+  });
   app.use(express.json({
-    limit: "50mb",
+    limit: "1mb",
     verify(req, _res, buffer) {
       if (req.url?.startsWith("/api/payments/paystack/webhook")) {
         (req as typeof req & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
       }
     },
   }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.use(express.urlencoded({ limit: "16kb", extended: true }));
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());

@@ -101,7 +101,7 @@ export function ProductCard({ product }: { product: Product }) {
 }
 
 export function TrustStrip() {
-  const items = [["Verified Artisans", "Every vendor is ID-verified and quality-checked"], ["Secure Payments", "Powered by Paystack & Flutterwave"], ["Fast Delivery", "Nationwide delivery, 5–7 business days"], ["Easy Returns", "Hassle-free 14-day return policy"]];
+  const items = [["Approved Sellers", "Published listings belong to approved seller accounts"], ["Hosted Checkout", "Payment details are entered only on Paystack’s hosted page"], ["Order Visibility", "Customers can view order and fulfillment status in their account"], ["Seller Workspace", "Vendors manage their listings, stock and paid order lines"]];
   return <section className="trust-strip"><div className="container-wide trust-grid">{items.map(([title, copy], index) => <div className="trust-item" key={title}><span className="trust-number">0{index + 1}</span><div><h3>{title}</h3><p>{copy}</p></div></div>)}</div></section>;
 }
 

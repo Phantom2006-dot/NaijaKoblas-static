@@ -11,7 +11,10 @@ export const startLogin = () => {
   const redirectUri = `${window.location.origin}/api/oauth/callback`;
 
   const nonce = crypto.randomUUID();
-  document.cookie = `${OAUTH_STATE_COOKIE}=${nonce}; Path=/; Max-Age=600; SameSite=None; Secure`;
+  const secureContext = window.location.protocol === "https:";
+  const sameSite = secureContext ? "None" : "Lax";
+  const secureAttribute = secureContext ? "; Secure" : "";
+  document.cookie = `${OAUTH_STATE_COOKIE}=${nonce}; Path=/; Max-Age=600; SameSite=${sameSite}${secureAttribute}`;
   const state = encodeOAuthState({ redirectUri, nonce });
 
   const url = new URL(`${oauthPortalUrl}/app-auth`);

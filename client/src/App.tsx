@@ -7,7 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { StoreProvider } from "./store";
 import { StoreShell } from "./components/store/StoreShell";
 import { AboutPage, AuthPage, CartPage, CheckoutPage, ContactPage, HomePage, InfoPage, OrderConfirmationPage, ProductDetailPage, ProductsPage, VendorPage, WaitlistPage } from "./pages/StorePages";
-import { AccountPage, AdminDashboardPage, SellerDashboardPage, StaffDashboardPage } from "./pages/AccountPages";
+import { AccountPage, AdminDashboardPage, SellerDashboardPage, StaffDashboardPage, SuspendedSellerFulfillmentPage } from "./pages/AccountPages";
 
 function Router() {
   return <StoreShell><Switch>
@@ -24,6 +24,7 @@ function Router() {
     <Route path="/signup" component={() => <AuthPage signup />} />
     <Route path="/waitlist" component={WaitlistPage} />
     <Route path="/account" component={AccountPage} />
+    <Route path="/seller-fulfillment" component={SuspendedSellerFulfillmentPage} />
     <Route path="/seller" component={SellerDashboardPage} />
     <Route path="/staff" component={StaffDashboardPage} />
     <Route path="/admin" component={AdminDashboardPage} />

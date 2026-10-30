@@ -1,33 +1,24 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { trpc } from "@/lib/trpc";
 
 export type Product = {
   id: string;
   name: string;
-  category: "Shoes" | "Bags" | "Belts" | "Accessories";
+  category: string;
   maker: string;
   price: number;
   image: string;
   badge?: "New" | "Popular" | "Limited";
   description: string;
-  rating: number;
-  reviews: number;
+  rating?: number;
+  reviews?: number;
   sizes: string[];
-  experience: string;
-  color: "Brown" | "Tan" | "Black" | "Olive" | "Rust" | "Sand";
-};
+  experience?: string;
+  color?: "Brown" | "Tan" | "Black" | "Olive" | "Rust" | "Sand";
+  inventoryCount?: number;
+}
 
 export type CartLine = { productId: string; quantity: number; size: string };
-
-export type CheckoutDetails = {
-  customer: { firstName: string; lastName: string; email: string; address: string; city: string; phone: string };
-  delivery: "Standard Delivery" | "Express Delivery";
-  payment: "Card" | "Bank Transfer" | "USSD";
-  subtotal: number;
-  shipping: number;
-  total: number;
-};
-
-export type Order = CheckoutDetails & { number: string; createdAt: string; items: CartLine[] };
 
 const leather = {
   sneakers: "/naijakoblas-sneakers.jpg",
@@ -181,7 +172,9 @@ const defaultCart: CartLine[] = [];
 type StoreContextValue = {
   cart: CartLine[];
   wishlist: string[];
-  lastOrder: Order | null;
+  catalogProducts: Product[];
+  catalogLoading: boolean;
+  catalogError: string | null;
   cartCount: number;
   subtotal: number;
   shipping: number;
@@ -189,13 +182,27 @@ type StoreContextValue = {
   addToCart: (productId: string, size?: string) => void;
   updateQuantity: (productId: string, size: string, quantity: number) => void;
   removeFromCart: (productId: string, size: string) => void;
+  clearCart: () => void;
   toggleWishlist: (productId: string) => void;
-  placeOrder: (details: CheckoutDetails) => Order;
 };
 
 const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
+  const catalogQuery = trpc.catalog.list.useQuery(undefined, { retry: false });
+  const catalogProducts = useMemo<Product[]>(() => (catalogQuery.data ?? []).map(product => ({
+    id: product.id,
+    name: product.name,
+    category: product.category,
+    maker: product.maker,
+    price: product.priceKobo / 100,
+    image: product.imageUrl ?? "/naijakoblas-hero.jpg",
+    description: product.description,
+    sizes: product.sizes,
+    experience: product.city ? `${product.city}, Nigeria` : "Nigeria",
+    color: "Brown",
+    inventoryCount: product.inventoryCount,
+  })), [catalogQuery.data]);
   const [cart, setCart] = useState<CartLine[]>(() => {
     try {
       const saved = localStorage.getItem("koblas-cart");
@@ -207,23 +214,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [wishlist, setWishlist] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem("koblas-wishlist") ?? "[]"); } catch { return []; }
   });
-  // Order persistence belongs to the authenticated server-side order module.
-  // Until that backend is connected, keep preview confirmation data in memory
-  // rather than leaving customer delivery details in browser storage.
-  const [lastOrder, setLastOrder] = useState<Order | null>(null);
-
   useEffect(() => localStorage.setItem("koblas-cart", JSON.stringify(cart)), [cart]);
   useEffect(() => localStorage.setItem("koblas-wishlist", JSON.stringify(wishlist)), [wishlist]);
 
   const cartCount = cart.reduce((sum, line) => sum + line.quantity, 0);
-  const subtotal = cart.reduce((sum, line) => sum + (products.find((item) => item.id === line.productId)?.price ?? 0) * line.quantity, 0);
+  const subtotal = cart.reduce((sum, line) => sum + (catalogProducts.find((item) => item.id === line.productId)?.price ?? 0) * line.quantity, 0);
   const shipping = subtotal === 0 || subtotal >= 50000 ? 0 : 2500;
   const total = subtotal + shipping;
 
   const value = useMemo<StoreContextValue>(() => ({
-    cart, wishlist, lastOrder, cartCount, subtotal, shipping, total,
+    cart, wishlist, catalogProducts, catalogLoading: catalogQuery.isLoading,
+    catalogError: catalogQuery.error?.message ?? null, cartCount, subtotal, shipping, total,
     addToCart: (productId, size) => setCart((current) => {
-      const product = products.find((item) => item.id === productId);
+      const product = catalogProducts.find((item) => item.id === productId);
+      if (!product || (product.inventoryCount ?? 0) < 1) return current;
       const chosenSize = size ?? product?.sizes[0] ?? "Standard";
       const found = current.find((line) => line.productId === productId && line.size === chosenSize);
       if (found) return current.map((line) => line === found ? { ...line, quantity: line.quantity + 1 } : line);
@@ -231,14 +235,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }),
     updateQuantity: (productId, size, quantity) => setCart((current) => current.map((line) => line.productId === productId && line.size === size ? { ...line, quantity: Math.max(1, quantity) } : line)),
     removeFromCart: (productId, size) => setCart((current) => current.filter((line) => !(line.productId === productId && line.size === size))),
+    clearCart: () => setCart([]),
     toggleWishlist: (productId) => setWishlist((current) => current.includes(productId) ? current.filter((id) => id !== productId) : [...current, productId]),
-    placeOrder: (details) => {
-      const order: Order = { number: `NK${Math.random().toString(36).slice(2, 10).toUpperCase()}`, createdAt: new Date().toISOString(), items: cart, ...details };
-      setLastOrder(order);
-      setCart([]);
-      return order;
-    },
-  }), [cart, wishlist, lastOrder, cartCount, subtotal, shipping, total]);
+  }), [cart, wishlist, catalogProducts, catalogQuery.isLoading, catalogQuery.error, cartCount, subtotal, shipping, total]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }

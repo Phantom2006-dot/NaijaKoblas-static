@@ -17,7 +17,8 @@ import {
 export const accountRoles = ["customer", "seller", "staff", "admin"] as const;
 export const sellerApplicationStatuses = ["pending", "approved", "rejected", "suspended"] as const;
 export const productStatuses = ["draft", "published", "archived"] as const;
-export const orderStatuses = ["pending_payment", "paid", "payment_failed", "cancelled", "fulfilled"] as const;
+export const orderStatuses = ["pending_payment", "paid", "partially_fulfilled", "payment_failed", "cancelled", "fulfilled"] as const;
+export const orderItemStatuses = ["unfulfilled", "processing", "shipped", "fulfilled"] as const;
 export const paymentStatuses = ["pending", "succeeded", "failed"] as const;
 export const deliveryMethods = ["standard", "express"] as const;
 
@@ -25,6 +26,7 @@ export const accountRoleEnum = pgEnum("account_role", accountRoles);
 export const sellerApplicationStatusEnum = pgEnum("seller_application_status", sellerApplicationStatuses);
 export const productStatusEnum = pgEnum("product_status", productStatuses);
 export const orderStatusEnum = pgEnum("order_status", orderStatuses);
+export const orderItemStatusEnum = pgEnum("order_item_status", orderItemStatuses);
 export const paymentStatusEnum = pgEnum("payment_status", paymentStatuses);
 export const deliveryMethodEnum = pgEnum("delivery_method", deliveryMethods);
 export const paymentProviderEnum = pgEnum("payment_provider", ["paystack"]);
@@ -116,7 +118,7 @@ export const sellerStores = pgTable("sellerStores", {
 /** Every seller-created listing is owned by one seller account. Draft is the safe default. */
 export const sellerProducts = pgTable("sellerProducts", {
   id: varchar("id", { length: 64 }).primaryKey(),
-  sellerUserId: integer("sellerUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sellerUserId: integer("sellerUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
   name: varchar("name", { length: 180 }).notNull(),
   description: text("description").notNull(),
   category: varchar("category", { length: 80 }).notNull(),
@@ -140,6 +142,7 @@ export const orders = pgTable("orders", {
   reference: varchar("reference", { length: 64 }).notNull().unique(),
   customerUserId: integer("customerUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
   idempotencyKey: varchar("idempotencyKey", { length: 64 }).notNull(),
+  idempotencyFingerprint: varchar("idempotencyFingerprint", { length: 64 }).notNull(),
   status: orderStatusEnum("status").default("pending_payment").notNull(),
   currency: varchar("currency", { length: 3 }).default("NGN").notNull(),
   firstName: varchar("firstName", { length: 100 }).notNull(),
@@ -159,30 +162,36 @@ export const orders = pgTable("orders", {
   customerCreatedIdx: index("orders_customer_createdAt_idx").on(table.customerUserId, table.createdAt),
   statusCreatedIdx: index("orders_status_createdAt_idx").on(table.status, table.createdAt),
   totalsConsistent: check("orders_totals_consistent", sql`${table.subtotalKobo} >= 0 AND ${table.shippingKobo} >= 0 AND ${table.totalKobo} = ${table.subtotalKobo} + ${table.shippingKobo}`),
+  ngnCurrency: check("orders_ngn_currency", sql`${table.currency} = 'NGN'`),
 }));
 
 /** Item and seller snapshots preserve what was purchased even if a listing later changes. */
 export const orderItems = pgTable("orderItems", {
   id: serial("id").primaryKey(),
   orderId: integer("orderId").notNull().references(() => orders.id, { onDelete: "cascade" }),
-  productId: varchar("productId", { length: 64 }).references(() => sellerProducts.id, { onDelete: "set null" }),
-  sellerUserId: integer("sellerUserId").references(() => users.id, { onDelete: "set null" }),
+  productId: varchar("productId", { length: 64 }).notNull().references(() => sellerProducts.id, { onDelete: "restrict" }),
+  sellerUserId: integer("sellerUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
   nameSnapshot: varchar("nameSnapshot", { length: 180 }).notNull(),
   makerSnapshot: varchar("makerSnapshot", { length: 160 }).notNull(),
   unitPriceKobo: integer("unitPriceKobo").notNull(),
   quantity: integer("quantity").notNull(),
   size: varchar("size", { length: 40 }).notNull(),
   lineTotalKobo: integer("lineTotalKobo").notNull(),
+  fulfillmentStatus: orderItemStatusEnum("fulfillmentStatus").default("unfulfilled").notNull(),
+  carrier: varchar("carrier", { length: 100 }),
+  trackingNumber: varchar("trackingNumber", { length: 120 }),
+  fulfilledAt: timestamp("fulfilledAt", { withTimezone: true, mode: "date" }),
+  updatedAt: updatedAt(),
 }, table => ({
   orderIdx: index("orderItems_order_idx").on(table.orderId),
   sellerOrderIdx: index("orderItems_seller_order_idx").on(table.sellerUserId, table.orderId),
   lineTotalConsistent: check("orderItems_total_consistent", sql`${table.unitPriceKobo} > 0 AND ${table.quantity} > 0 AND ${table.lineTotalKobo} = ${table.unitPriceKobo} * ${table.quantity}`),
 }));
 
-/** Payment provider references and checkout URLs are server-owned; no card data is stored. */
+/** Paystack transaction references and hosted URLs are server-owned; no card data is stored. */
 export const paymentTransactions = pgTable("paymentTransactions", {
   id: serial("id").primaryKey(),
-  orderId: integer("orderId").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  orderId: integer("orderId").notNull().references(() => orders.id, { onDelete: "restrict" }),
   provider: paymentProviderEnum("provider").default("paystack").notNull(),
   reference: varchar("reference", { length: 64 }).notNull().unique(),
   status: paymentStatusEnum("status").default("pending").notNull(),
@@ -194,8 +203,13 @@ export const paymentTransactions = pgTable("paymentTransactions", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, table => ({
-  orderIdx: index("paymentTransactions_order_idx").on(table.orderId),
+  orderUnique: uniqueIndex("paymentTransactions_order_unique").on(table.orderId),
+  statusCreatedIdx: index("paymentTransactions_status_createdAt_idx").on(table.status, table.createdAt),
+  statusIdIdx: index("paymentTransactions_status_id_idx").on(table.status, table.id),
+  providerTransactionIdUnique: uniqueIndex("paymentTransactions_providerTransactionId_unique")
+    .on(table.providerTransactionId).where(sql`${table.providerTransactionId} IS NOT NULL`),
   positiveAmount: check("paymentTransactions_positive_amount", sql`${table.amountKobo} > 0`),
+  ngnCurrency: check("paymentTransactions_ngn_currency", sql`${table.currency} = 'NGN'`),
 }));
 
 export type AccountRole = (typeof accountRoles)[number];

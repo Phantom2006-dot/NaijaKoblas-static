@@ -49,6 +49,10 @@ export function canTransitionSellerApplication(from: SellerApplicationStatus, to
   return sellerApplicationTransitions[from].includes(to);
 }
 
+export function canAccessSellerFulfillment(role: AccountRole, applicationStatus: SellerApplicationStatus | null) {
+  return role === "seller" || (role === "customer" && applicationStatus === "suspended");
+}
+
 export function requireCapability(user: User | null, capability: Capability) {
   if (!user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Please sign in to continue." });

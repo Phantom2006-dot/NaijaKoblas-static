@@ -2,12 +2,15 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { COOKIE_NAME } from "@shared/const";
 import type { User } from "../drizzle/schema";
+import { canAccessSellerFulfillment } from "./_core/authorization";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { ENV } from "./_core/env";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router, sellerProcedure, staffProcedure } from "./_core/trpc";
+import { fulfillmentStatuses } from "./commerce/fulfillment";
 import * as db from "./db";
-import { initializePaystackCheckout, verifyPaystackTransaction, type PaystackChannel } from "./payments/paystack";
+import { initializePaystackCheckout, verifyPaystackTransaction } from "./payments/paystack";
+import { classifyPaystackTransaction } from "./payments/reconciliation";
 
 const sellerApplicationInput = z.object({
   legalName: z.string().trim().min(2).max(160),
@@ -38,7 +41,6 @@ const checkoutInput = profileInput.extend({
     quantity: z.number().int().min(1).max(20),
     size: z.string().trim().min(1).max(40),
   })).min(1).max(30),
-  channel: z.enum(["card", "bank_transfer", "ussd"]).default("card"),
 });
 const sellerProductFields = {
   name: z.string().trim().min(2).max(180),
@@ -59,6 +61,22 @@ const publicAccount = (user: Pick<User, "id" | "name" | "email" | "role" | "crea
   createdAt: user.createdAt,
   lastSignedIn: user.lastSignedIn,
 });
+
+async function rereadCustomerPaymentStatus(customerUserId: number, reference: string): Promise<"paid" | "failed" | "pending"> {
+  const current = await db.getPaymentForCustomer(customerUserId, reference);
+  if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Order payment was not found." });
+  if (current.payment.status === "succeeded" && ["paid", "partially_fulfilled", "fulfilled"].includes(current.order.status)) return "paid";
+  if (current.payment.status === "failed" || current.order.status === "payment_failed") return "failed";
+  return "pending";
+}
+
+async function assertSellerFulfillmentAccess(user: User) {
+  if (user.role === "seller") return;
+  const application = await db.getSellerApplicationByUserId(user.id);
+  if (!canAccessSellerFulfillment(user.role, application?.status ?? null)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Seller approval is required to access order fulfillment." });
+  }
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -107,82 +125,89 @@ export const appRouter = router({
     mine: protectedProcedure.query(({ ctx }) => db.listCustomerOrders(ctx.user.id)),
     createCheckout: protectedProcedure.input(checkoutInput).mutation(async ({ ctx, input }) => {
       if (!ENV.paystackSecretKey || !ENV.appBaseUrl) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Hosted checkout is not configured yet." });
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Paystack hosted checkout is not configured yet." });
       }
-      const { channel, ...orderInput } = input;
       let created: Awaited<ReturnType<typeof db.createPendingOrder>>;
       try {
-        created = await db.createPendingOrder(ctx.user.id, orderInput);
+        created = await db.createPendingOrder(ctx.user.id, input);
       } catch (error) {
         if (error instanceof db.CommerceValidationError) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+          const inactive = error.message.includes("no longer active");
+          throw new TRPCError({ code: inactive ? "CONFLICT" : "BAD_REQUEST", message: inactive
+            ? "The previous checkout attempt has finished. Review availability and start a fresh checkout."
+            : error.message });
         }
         throw error;
       }
-      if (created.existing) {
-        if (created.authorizationUrl) {
-          return { orderReference: created.order.reference, authorizationUrl: created.authorizationUrl };
-        }
-        throw new TRPCError({ code: "CONFLICT", message: "This checkout is already being prepared. Retry shortly." });
+      if (created.authorizationUrl) {
+        return { orderReference: created.order.reference, reference: created.paymentReference, authorizationUrl: created.authorizationUrl };
       }
-      const channels: Record<typeof channel, PaystackChannel[]> = {
-        card: ["card"],
-        bank_transfer: ["bank_transfer"],
-        ussd: ["ussd"],
-      };
+
       try {
         const initialized = await initializePaystackCheckout({
           reference: created.paymentReference,
-          email: input.email,
-          amountKobo: created.order.totalKobo,
-          channels: channels[channel],
-        });
-        const saved = await db.savePaymentCheckoutUrl(initialized.reference, initialized.authorizationUrl);
-        if (!saved) throw new Error("Payment checkout is no longer pending.");
-        return {
           orderReference: created.order.reference,
-          authorizationUrl: initialized.authorizationUrl,
-        };
+          email: created.order.email,
+          amountKobo: created.order.totalKobo,
+          channels: ["card", "bank_transfer", "ussd"],
+          deliveryMethod: created.order.deliveryMethod,
+        });
+        const saved = await db.savePaystackCheckoutUrl({
+          reference: created.paymentReference,
+          checkoutUrl: initialized.authorizationUrl,
+        });
+        if (!saved) throw new Error("Checkout is no longer pending.");
+        return { orderReference: created.order.reference, reference: initialized.reference, authorizationUrl: initialized.authorizationUrl };
       } catch (error) {
-        await db.markPaymentFailed(created.paymentReference);
-        console.warn("[Payments] Could not initialize hosted checkout:", error instanceof Error ? error.message : "unknown error");
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Secure checkout could not be started. No payment was taken." });
+        // A timeout may leave a provider transaction behind. Keep stock reserved
+        // and require verification/reconciliation; never create a second order.
+        console.warn("[Paystack] Could not confirm hosted checkout:", error instanceof Error ? error.message : "unknown error");
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Checkout could not be confirmed yet. Your order remains pending; retry the same checkout or contact support before submitting another order." });
       }
     }),
     verifyMyPayment: protectedProcedure.input(z.object({ reference: z.string().min(8).max(64) })).mutation(async ({ ctx, input }) => {
       const record = await db.getPaymentForCustomer(ctx.user.id, input.reference);
       if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Order payment was not found." });
-      if (record.payment.status === "succeeded" && record.order.status === "paid") return { status: "paid" as const };
-      if (record.payment.status === "succeeded") {
-        throw new TRPCError({ code: "CONFLICT", message: "Payment status needs manual review." });
+      if (record.payment.status === "succeeded" && ["paid", "partially_fulfilled", "fulfilled"].includes(record.order.status)) {
+        return { status: "paid" as const, orderReference: record.order.reference };
       }
-      if (record.payment.status !== "pending") return { status: "failed" as const };
-      let verification;
+      if (record.payment.status === "succeeded") throw new TRPCError({ code: "CONFLICT", message: "Payment status needs manual review." });
+      if (record.payment.status !== "pending") return { status: "failed" as const, orderReference: record.order.reference };
+
+      let transaction;
       try {
-        verification = await verifyPaystackTransaction(input.reference);
+        transaction = await verifyPaystackTransaction(input.reference);
       } catch {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Payment status is not available yet. Please try again shortly." });
       }
-      if (verification.reference !== input.reference) {
-        throw new TRPCError({ code: "BAD_GATEWAY", message: "Payment provider returned a different transaction reference." });
+      const outcome = classifyPaystackTransaction(transaction, record.payment.reference);
+      if (outcome === "mismatch") {
+        throw new TRPCError({ code: "BAD_GATEWAY", message: "Paystack returned a transaction that does not match this order." });
       }
-      if (verification.status === "success") {
+      if (outcome === "success") {
         const result = await db.markPaymentSucceeded({
-          reference: input.reference,
-          amountKobo: verification.amount,
-          currency: verification.currency,
-          providerTransactionId: String(verification.id),
+          reference: record.payment.reference,
+          amountKobo: transaction.amount,
+          currency: transaction.currency,
+          providerTransactionId: String(transaction.id),
         });
         if (!result.success) {
+          const currentStatus = await rereadCustomerPaymentStatus(ctx.user.id, record.payment.reference);
+          if (currentStatus !== "pending") return { status: currentStatus, orderReference: record.order.reference };
           throw new TRPCError({ code: "CONFLICT", message: "Payment needs manual review before this order can be confirmed." });
         }
-        return { status: "paid" as const };
+        return { status: "paid" as const, orderReference: record.order.reference };
       }
-      if (verification.status === "failed" || verification.status === "abandoned") {
-        await db.markPaymentFailed(input.reference);
-        return { status: "failed" as const };
+      if (outcome === "failed") {
+        const failed = await db.markPaymentFailed(record.payment.reference);
+        if (!failed) {
+          const currentStatus = await rereadCustomerPaymentStatus(ctx.user.id, record.payment.reference);
+          if (currentStatus !== "pending") return { status: currentStatus, orderReference: record.order.reference };
+          throw new TRPCError({ code: "CONFLICT", message: "Payment changed while status was being confirmed. Refresh your order history." });
+        }
+        return { status: "failed" as const, orderReference: record.order.reference };
       }
-      return { status: "pending" as const };
+      return { status: "pending" as const, orderReference: record.order.reference };
     }),
   }),
 
@@ -223,6 +248,34 @@ export const appRouter = router({
       }
     }),
     orders: sellerProcedure.query(({ ctx }) => db.listOrdersForSeller(ctx.user.id)),
+    fulfillmentOrders: protectedProcedure.query(async ({ ctx }) => {
+      await assertSellerFulfillmentAccess(ctx.user);
+      return db.listOrdersForSeller(ctx.user.id);
+    }),
+    updateOrderItemFulfillment: protectedProcedure.input(z.object({
+      orderItemId: z.number().int().positive(),
+      status: z.enum(fulfillmentStatuses),
+      carrier: z.string().trim().min(1).max(100).nullable().optional(),
+      trackingNumber: z.string().trim().min(1).max(120).nullable().optional(),
+    })).mutation(async ({ ctx, input }) => {
+      await assertSellerFulfillmentAccess(ctx.user);
+      const result = await db.updateSellerOrderItemFulfillment({
+        sellerUserId: ctx.user.id,
+        ...input,
+      });
+      if (!result.success) {
+        const message = result.reason === "not_found"
+          ? "Order item not found."
+          : result.reason === "invalid_transition"
+            ? "That fulfillment status change is not allowed."
+            : "Only paid orders can be fulfilled.";
+        throw new TRPCError({
+          code: result.reason === "not_found" ? "NOT_FOUND" : "CONFLICT",
+          message,
+        });
+      }
+      return result;
+    }),
   }),
 
   staff: router({
@@ -247,6 +300,63 @@ export const appRouter = router({
 
   admin: router({
     users: adminProcedure.query(() => db.listUsersForAdmin()),
+    pendingPayments: adminProcedure.input(z.object({
+      afterId: z.number().int().positive().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    }).optional()).query(({ input }) => db.listPendingPaymentsForAdmin(input ?? {})),
+    reconcilePayment: adminProcedure.input(z.object({ reference: z.string().min(8).max(64) })).mutation(async ({ ctx, input }) => {
+      const record = await db.getPaymentByReference(input.reference);
+      if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Payment reference was not found." });
+      if (record.payment.status === "succeeded" && ["paid", "partially_fulfilled", "fulfilled"].includes(record.order.status)) {
+        return { status: "paid" as const, orderReference: record.order.reference };
+      }
+      if (record.payment.status === "failed") return { status: "failed" as const, orderReference: record.order.reference };
+      if (record.payment.status !== "pending" || record.order.status !== "pending_payment") {
+        throw new TRPCError({ code: "CONFLICT", message: "This payment is no longer pending and needs manual review." });
+      }
+
+      let transaction;
+      try {
+        transaction = await verifyPaystackTransaction(record.payment.reference);
+      } catch {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Paystack status could not be retrieved. No payment or inventory state was changed." });
+      }
+      const outcome = classifyPaystackTransaction(transaction, record.payment.reference);
+      if (outcome === "mismatch") {
+        throw new TRPCError({ code: "CONFLICT", message: "Paystack reference, amount or NGN currency does not match. No state was changed; escalate this payment for review." });
+      }
+      if (outcome === "success") {
+        const result = await db.markPaymentSucceeded({
+          reference: record.payment.reference,
+          amountKobo: transaction.amount,
+          currency: transaction.currency,
+          providerTransactionId: String(transaction.id),
+          actorUserId: ctx.user.id,
+        });
+        if (!result.success) {
+          const current = await db.getPaymentByReference(record.payment.reference);
+          if (current?.payment.status === "succeeded" && ["paid", "partially_fulfilled", "fulfilled"].includes(current.order.status)) {
+            return { status: "paid" as const, orderReference: record.order.reference };
+          }
+          if (current?.payment.status === "failed") return { status: "failed" as const, orderReference: record.order.reference };
+          throw new TRPCError({ code: "CONFLICT", message: "Payment could not be reconciled automatically; review the audit trail." });
+        }
+        return { status: "paid" as const, orderReference: record.order.reference };
+      }
+      if (outcome === "failed") {
+        const released = await db.markPaymentFailed(record.payment.reference, ctx.user.id);
+        if (!released) {
+          const current = await db.getPaymentByReference(record.payment.reference);
+          if (current?.payment.status === "succeeded" && ["paid", "partially_fulfilled", "fulfilled"].includes(current.order.status)) {
+            return { status: "paid" as const, orderReference: record.order.reference };
+          }
+          if (current?.payment.status === "failed") return { status: "failed" as const, orderReference: record.order.reference };
+          throw new TRPCError({ code: "CONFLICT", message: "Payment changed while reconciliation was running. Refresh and inspect the order." });
+        }
+        return { status: "failed" as const, orderReference: record.order.reference };
+      }
+      return { status: "pending" as const, orderReference: record.order.reference };
+    }),
     setStaffAccess: adminProcedure.input(z.object({ userId: z.number().int().positive(), grant: z.boolean() })).mutation(async ({ ctx, input }) => {
       const result = await db.changeStaffAccess({ actorUserId: ctx.user.id, targetUserId: input.userId, grant: input.grant });
       if (!result.success) {

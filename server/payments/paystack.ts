@@ -4,27 +4,26 @@ import { ENV } from "../_core/env";
 export type PaystackChannel = "card" | "bank_transfer" | "ussd";
 
 type PaystackEnvelope<T> = { status: boolean; message?: string; data?: T };
-
-type PaystackInitialization = {
-  authorization_url: string;
-  access_code: string;
-  reference: string;
-};
-
-type PaystackVerification = {
+type PaystackInitialization = { authorization_url: string; access_code: string; reference: string };
+export type PaystackVerification = {
   id: number | string;
   status: string;
   reference: string;
   amount: number;
   currency: string;
+  metadata?: unknown;
 };
 
 function requiredSecret() {
-  if (!ENV.paystackSecretKey) throw new Error("Paystack is not configured.");
+  if (!ENV.paystackSecretKey) throw new Error("PAYSTACK_SECRET_KEY is not configured.");
   return ENV.paystackSecretKey;
 }
 
-function callbackUrl() {
+function safeReference(reference: string) {
+  if (!/^[A-Za-z0-9.=\-]{1,64}$/.test(reference)) throw new Error("Invalid Paystack transaction reference.");
+}
+
+function appOrigin() {
   if (!ENV.appBaseUrl) throw new Error("APP_BASE_URL is not configured.");
   let base: URL;
   try {
@@ -32,37 +31,57 @@ function callbackUrl() {
   } catch {
     throw new Error("APP_BASE_URL must be a valid absolute URL.");
   }
-  if (base.protocol !== "https:" && !(ENV.isProduction === false && base.protocol === "http:")) {
-    throw new Error("APP_BASE_URL must use HTTPS in production.");
+  if (base.username || base.password || (base.protocol !== "https:" && !(ENV.isProduction === false && base.protocol === "http:"))) {
+    throw new Error("APP_BASE_URL must use HTTPS in production and cannot contain credentials.");
   }
-  return new URL("/order-confirmation", base).toString();
+  return base.origin;
 }
 
-function checkoutUrl(value: string | undefined) {
-  if (!value) throw new Error("Payment provider did not return a checkout URL.");
+function callbackUrl() {
+  return new URL("/order-confirmation", appOrigin()).toString();
+}
+
+function cancelActionUrl(deliveryMethod: "standard" | "express") {
+  const url = new URL("/checkout", appOrigin());
+  url.searchParams.set("delivery", deliveryMethod);
+  url.searchParams.set("cancelled", "true");
+  return url.toString();
+}
+
+function hostedCheckoutUrl(value: string | undefined) {
+  if (!value) throw new Error("Paystack did not return a checkout URL.");
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new Error("Payment provider returned an invalid checkout URL.");
+    throw new Error("Paystack returned an invalid checkout URL.");
   }
   if (url.protocol !== "https:" || url.hostname !== "checkout.paystack.com") {
-    throw new Error("Payment provider returned an untrusted checkout URL.");
+    throw new Error("Paystack returned an untrusted checkout URL.");
   }
   return url.toString();
 }
 
 export async function initializePaystackCheckout(input: {
   reference: string;
+  orderReference: string;
   email: string;
   amountKobo: number;
   channels: PaystackChannel[];
+  deliveryMethod: "standard" | "express";
 }) {
-  const secret = requiredSecret();
+  safeReference(input.reference);
+  if (!input.email.trim() || !Number.isSafeInteger(input.amountKobo) || input.amountKobo < 1) {
+    throw new Error("Paystack checkout requires a valid email and positive integer amount in kobo.");
+  }
+  const allowedChannels: PaystackChannel[] = ["card", "bank_transfer", "ussd"];
+  if (!input.channels.length || input.channels.some(channel => !allowedChannels.includes(channel))) {
+    throw new Error("Invalid Paystack payment channels.");
+  }
   const response = await fetch("https://api.paystack.co/transaction/initialize", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${secret}`,
+      Authorization: `Bearer ${requiredSecret()}`,
       "Content-Type": "application/json",
       Accept: "application/json",
     },
@@ -73,31 +92,35 @@ export async function initializePaystackCheckout(input: {
       reference: input.reference,
       callback_url: callbackUrl(),
       channels: input.channels,
-      metadata: { order_reference: input.reference },
+      metadata: {
+        order_reference: input.orderReference,
+        payment_reference: input.reference,
+        cancel_action: cancelActionUrl(input.deliveryMethod),
+      },
     }),
     signal: AbortSignal.timeout(12_000),
   });
-  if (!response.ok) throw new Error("Payment provider could not start checkout.");
+  if (!response.ok) throw new Error("Paystack could not start checkout.");
   const payload = await response.json() as PaystackEnvelope<PaystackInitialization>;
   if (!payload.status || !payload.data || payload.data.reference !== input.reference) {
-    throw new Error("Payment provider did not confirm the checkout request.");
+    throw new Error("Paystack did not confirm the checkout request.");
   }
   return {
-    authorizationUrl: checkoutUrl(payload.data.authorization_url),
+    authorizationUrl: hostedCheckoutUrl(payload.data.authorization_url),
     reference: payload.data.reference,
   };
 }
 
-export async function verifyPaystackTransaction(reference: string) {
-  const secret = requiredSecret();
+export async function verifyPaystackTransaction(reference: string): Promise<PaystackVerification> {
+  safeReference(reference);
   const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
     method: "GET",
-    headers: { Authorization: `Bearer ${secret}`, Accept: "application/json" },
+    headers: { Authorization: `Bearer ${requiredSecret()}`, Accept: "application/json" },
     signal: AbortSignal.timeout(12_000),
   });
-  if (!response.ok) throw new Error("Payment provider could not verify this transaction.");
+  if (!response.ok) throw new Error("Paystack could not verify this transaction.");
   const payload = await response.json() as PaystackEnvelope<PaystackVerification>;
-  if (!payload.status || !payload.data) throw new Error("Payment provider returned no transaction status.");
+  if (!payload.status || !payload.data) throw new Error("Paystack returned no transaction status.");
   return payload.data;
 }
 
@@ -105,5 +128,5 @@ export function verifyPaystackSignature(rawBody: Buffer, signature: string | und
   if (!secret || !signature || !/^[a-f0-9]{128}$/i.test(signature)) return false;
   const expected = createHmac("sha512", secret).update(rawBody).digest();
   const supplied = Buffer.from(signature, "hex");
-  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  return supplied.length === expected.length && timingSafeEqual(expected, supplied);
 }

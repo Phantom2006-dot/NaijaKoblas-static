@@ -1,6 +1,7 @@
 CREATE TYPE "public"."account_role" AS ENUM('customer', 'seller', 'staff', 'admin');--> statement-breakpoint
 CREATE TYPE "public"."delivery_method" AS ENUM('standard', 'express');--> statement-breakpoint
-CREATE TYPE "public"."order_status" AS ENUM('pending_payment', 'paid', 'payment_failed', 'cancelled', 'fulfilled');--> statement-breakpoint
+CREATE TYPE "public"."order_item_status" AS ENUM('unfulfilled', 'processing', 'shipped', 'fulfilled');--> statement-breakpoint
+CREATE TYPE "public"."order_status" AS ENUM('pending_payment', 'paid', 'partially_fulfilled', 'payment_failed', 'cancelled', 'fulfilled');--> statement-breakpoint
 CREATE TYPE "public"."payment_provider" AS ENUM('paystack');--> statement-breakpoint
 CREATE TYPE "public"."payment_status" AS ENUM('pending', 'succeeded', 'failed');--> statement-breakpoint
 CREATE TYPE "public"."product_status" AS ENUM('draft', 'published', 'archived');--> statement-breakpoint
@@ -36,14 +37,19 @@ CREATE TABLE "customerProfiles" (
 CREATE TABLE "orderItems" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"orderId" integer NOT NULL,
-	"productId" varchar(64),
-	"sellerUserId" integer,
+	"productId" varchar(64) NOT NULL,
+	"sellerUserId" integer NOT NULL,
 	"nameSnapshot" varchar(180) NOT NULL,
 	"makerSnapshot" varchar(160) NOT NULL,
 	"unitPriceKobo" integer NOT NULL,
 	"quantity" integer NOT NULL,
 	"size" varchar(40) NOT NULL,
 	"lineTotalKobo" integer NOT NULL,
+	"fulfillmentStatus" "order_item_status" DEFAULT 'unfulfilled' NOT NULL,
+	"carrier" varchar(100),
+	"trackingNumber" varchar(120),
+	"fulfilledAt" timestamp with time zone,
+	"updatedAt" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "orderItems_total_consistent" CHECK ("orderItems"."unitPriceKobo" > 0 AND "orderItems"."quantity" > 0 AND "orderItems"."lineTotalKobo" = "orderItems"."unitPriceKobo" * "orderItems"."quantity")
 );
 --> statement-breakpoint
@@ -52,6 +58,7 @@ CREATE TABLE "orders" (
 	"reference" varchar(64) NOT NULL,
 	"customerUserId" integer NOT NULL,
 	"idempotencyKey" varchar(64) NOT NULL,
+	"idempotencyFingerprint" varchar(64) NOT NULL,
 	"status" "order_status" DEFAULT 'pending_payment' NOT NULL,
 	"currency" varchar(3) DEFAULT 'NGN' NOT NULL,
 	"firstName" varchar(100) NOT NULL,
@@ -67,7 +74,8 @@ CREATE TABLE "orders" (
 	"createdAt" timestamp with time zone DEFAULT now() NOT NULL,
 	"updatedAt" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "orders_reference_unique" UNIQUE("reference"),
-	CONSTRAINT "orders_totals_consistent" CHECK ("orders"."subtotalKobo" >= 0 AND "orders"."shippingKobo" >= 0 AND "orders"."totalKobo" = "orders"."subtotalKobo" + "orders"."shippingKobo")
+	CONSTRAINT "orders_totals_consistent" CHECK ("orders"."subtotalKobo" >= 0 AND "orders"."shippingKobo" >= 0 AND "orders"."totalKobo" = "orders"."subtotalKobo" + "orders"."shippingKobo"),
+	CONSTRAINT "orders_ngn_currency" CHECK ("orders"."currency" = 'NGN')
 );
 --> statement-breakpoint
 CREATE TABLE "paymentTransactions" (
@@ -84,7 +92,8 @@ CREATE TABLE "paymentTransactions" (
 	"createdAt" timestamp with time zone DEFAULT now() NOT NULL,
 	"updatedAt" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "paymentTransactions_reference_unique" UNIQUE("reference"),
-	CONSTRAINT "paymentTransactions_positive_amount" CHECK ("paymentTransactions"."amountKobo" > 0)
+	CONSTRAINT "paymentTransactions_positive_amount" CHECK ("paymentTransactions"."amountKobo" > 0),
+	CONSTRAINT "paymentTransactions_ngn_currency" CHECK ("paymentTransactions"."currency" = 'NGN')
 );
 --> statement-breakpoint
 CREATE TABLE "sellerApplications" (
@@ -150,13 +159,13 @@ ALTER TABLE "accountAuditEvents" ADD CONSTRAINT "accountAuditEvents_targetUserId
 ALTER TABLE "adminBootstrap" ADD CONSTRAINT "adminBootstrap_userId_users_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "customerProfiles" ADD CONSTRAINT "customerProfiles_userId_users_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "orderItems" ADD CONSTRAINT "orderItems_orderId_orders_id_fk" FOREIGN KEY ("orderId") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "orderItems" ADD CONSTRAINT "orderItems_productId_sellerProducts_id_fk" FOREIGN KEY ("productId") REFERENCES "public"."sellerProducts"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "orderItems" ADD CONSTRAINT "orderItems_sellerUserId_users_id_fk" FOREIGN KEY ("sellerUserId") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "orderItems" ADD CONSTRAINT "orderItems_productId_sellerProducts_id_fk" FOREIGN KEY ("productId") REFERENCES "public"."sellerProducts"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "orderItems" ADD CONSTRAINT "orderItems_sellerUserId_users_id_fk" FOREIGN KEY ("sellerUserId") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "orders" ADD CONSTRAINT "orders_customerUserId_users_id_fk" FOREIGN KEY ("customerUserId") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "paymentTransactions" ADD CONSTRAINT "paymentTransactions_orderId_orders_id_fk" FOREIGN KEY ("orderId") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "paymentTransactions" ADD CONSTRAINT "paymentTransactions_orderId_orders_id_fk" FOREIGN KEY ("orderId") REFERENCES "public"."orders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sellerApplications" ADD CONSTRAINT "sellerApplications_userId_users_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sellerApplications" ADD CONSTRAINT "sellerApplications_reviewedByUserId_users_id_fk" FOREIGN KEY ("reviewedByUserId") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "sellerProducts" ADD CONSTRAINT "sellerProducts_sellerUserId_users_id_fk" FOREIGN KEY ("sellerUserId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "sellerProducts" ADD CONSTRAINT "sellerProducts_sellerUserId_users_id_fk" FOREIGN KEY ("sellerUserId") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sellerStores" ADD CONSTRAINT "sellerStores_userId_users_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "accountAuditEvents_target_createdAt_idx" ON "accountAuditEvents" USING btree ("targetUserId","createdAt");--> statement-breakpoint
 CREATE INDEX "accountAuditEvents_actor_createdAt_idx" ON "accountAuditEvents" USING btree ("actorUserId","createdAt");--> statement-breakpoint
@@ -166,7 +175,10 @@ CREATE INDEX "orderItems_seller_order_idx" ON "orderItems" USING btree ("sellerU
 CREATE UNIQUE INDEX "orders_customer_idempotency_unique" ON "orders" USING btree ("customerUserId","idempotencyKey");--> statement-breakpoint
 CREATE INDEX "orders_customer_createdAt_idx" ON "orders" USING btree ("customerUserId","createdAt");--> statement-breakpoint
 CREATE INDEX "orders_status_createdAt_idx" ON "orders" USING btree ("status","createdAt");--> statement-breakpoint
-CREATE INDEX "paymentTransactions_order_idx" ON "paymentTransactions" USING btree ("orderId");--> statement-breakpoint
+CREATE UNIQUE INDEX "paymentTransactions_order_unique" ON "paymentTransactions" USING btree ("orderId");--> statement-breakpoint
+CREATE INDEX "paymentTransactions_status_createdAt_idx" ON "paymentTransactions" USING btree ("status","createdAt");--> statement-breakpoint
+CREATE INDEX "paymentTransactions_status_id_idx" ON "paymentTransactions" USING btree ("status","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "paymentTransactions_providerTransactionId_unique" ON "paymentTransactions" USING btree ("providerTransactionId") WHERE "paymentTransactions"."providerTransactionId" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "sellerApplications_userId_unique" ON "sellerApplications" USING btree ("userId");--> statement-breakpoint
 CREATE INDEX "sellerApplications_status_updatedAt_idx" ON "sellerApplications" USING btree ("status","updatedAt");--> statement-breakpoint
 CREATE INDEX "sellerApplications_reviewer_idx" ON "sellerApplications" USING btree ("reviewedByUserId");--> statement-breakpoint

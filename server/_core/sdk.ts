@@ -205,8 +205,9 @@ class SDKServer {
       return null;
     }
 
+    const secretKey = this.getSessionSecret();
+    if (!ENV.appId) throw new Error("MANUS_PROJECT_ID is unavailable");
     try {
-      const secretKey = this.getSessionSecret();
       const { payload } = await jwtVerify(cookieValue, secretKey, {
         algorithms: ["HS256"],
       });
@@ -297,20 +298,24 @@ class SDKServer {
 
     // If user not in DB, sync from OAuth server automatically
     if (!user) {
+      let userInfo: GetUserInfoWithJwtResponse;
       try {
-        const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
-        await db.upsertUser({
-          openId: userInfo.openId,
-          name: userInfo.name || null,
-          email: userInfo.email ?? null,
-          loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
-          lastSignedIn: signedInAt,
-        });
-        user = await db.getUserByOpenId(userInfo.openId);
+        userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
       } catch (error) {
-        console.error("[Auth] Failed to sync user from OAuth:", error);
-        throw ForbiddenError("Failed to sync user info");
+        if (axios.isAxiosError(error) && [401, 403].includes(error.response?.status ?? 0)) {
+          throw ForbiddenError("Failed to sync user info");
+        }
+        console.error("[Auth] OAuth identity lookup failed:", error instanceof Error ? error.message : "unknown error");
+        throw error;
       }
+      await db.upsertUser({
+        openId: userInfo.openId,
+        name: userInfo.name || null,
+        email: userInfo.email ?? null,
+        loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
+        lastSignedIn: signedInAt,
+      });
+      user = await db.getUserByOpenId(userInfo.openId);
     }
 
     if (!user) {

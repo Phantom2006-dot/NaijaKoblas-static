@@ -2,7 +2,7 @@ import { COOKIE_NAME, SESSION_DURATION_MS, OAUTH_STATE_COOKIE, decodeOAuthState 
 import { parse as parseCookieHeader } from "cookie";
 import type { Express, Request, Response } from "express";
 import * as db from "../db";
-import { getSessionCookieOptions } from "./cookies";
+import { getOAuthStateCookieOptions, getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
 
 function getQueryParam(req: Request, key: string): string | undefined {
@@ -29,7 +29,7 @@ export function registerOAuthRoutes(app: Express) {
       res.status(403).json({ error: "invalid oauth state" });
       return;
     }
-    res.clearCookie(OAUTH_STATE_COOKIE, { path: "/", secure: true, sameSite: "none" });
+    res.clearCookie(OAUTH_STATE_COOKIE, getOAuthStateCookieOptions(req));
 
     try {
       const tokenResponse = await sdk.exchangeCodeForToken(code, state);
