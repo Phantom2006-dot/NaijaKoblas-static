@@ -39,6 +39,10 @@ Customer profiles, orders and payment status are private to the authenticated cu
 
 Paystack documents `abandoned` and `failed` as unsuccessful, and `reversed` as a refunded or successfully disputed/charged-back transaction [20]. For an order still in `pending_payment` (not yet fulfilled), these statuses release the reserved inventory once; a `reversed` transaction is never treated as a new success. `pending`, `ongoing` and `processing` remain reserved. Success is accepted only after signed-webhook or server-verification checks. Ambiguous initialization/network outcomes remain pending; scheduled reconciliation and escalation are still needed before launch, and stock must not be freed solely because a timer elapsed. Refunds, returns, support/dispute workflow, seller commissions and vendor payouts remain unimplemented.
 
+## Fly.io test hosting
+
+The test deployment configuration targets one London `shared-cpu-1x` 512 MB machine with HTTPS, a `/api/health` check, automatic start on incoming requests, and stop-on-idle with zero minimum running machines. Fly’s pricing varies by machine size and region and meters running time; stopped-machine storage and network charges should also be checked in the account’s current [Fly pricing](https://fly.io/pricing/) and [resource pricing](https://docs.fly.io/about/pricing) pages. The configuration keys used here are documented in Fly’s [configuration reference](https://docs.fly.io/reference/configuration).
+
 ## References
 
 [1]: https://neon.tech/docs/guides/drizzle "Connect from Drizzle to Neon"

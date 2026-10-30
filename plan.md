@@ -2,7 +2,7 @@
 
 ## Storefront and runtime boundary
 
-The React storefront is connected to the authenticated tRPC backend for catalog, checkout, payment confirmation, customer order history and seller workspace operations. The supplied ZIP backend remains merged additively with the original storefront and Git history. The current GitHub/Vercel configuration still serves a static SPA only; it does not deploy the Express API. A public build-time `VITE_API_BASE_URL` lets the storefront reach a separately hosted API, whose CORS allowlist is tied to the configured storefront origin.
+The React storefront is connected to the authenticated tRPC backend for catalog, checkout, payment confirmation, customer order history and seller workspace operations. The supplied ZIP backend remains merged additively with the original storefront and Git history. `vercel.json` now configures a static Vite build and proxies `/api/*` to the Fly test API; the Vercel project has not yet been created or deployed. The Fly app record `naijakoblas-api-test` exists, but no application image or machine is deployed yet. The target API configuration is one London shared 512 MB machine with stop-on-idle and automatic start.
 
 ## Identity, roles and first administrator
 
@@ -14,7 +14,7 @@ The first administrator is granted only after the owner has completed OAuth and 
 
 The app uses Drizzle ORM with `pg.Pool` and Neon PostgreSQL. Runtime reads pooled `DATABASE_URL`; Drizzle Kit prefers direct `DATABASE_URL_UNPOOLED`. PostgreSQL migrations live in `drizzle/postgres/`. Historical MySQL migrations remain legacy and are not applied by the new configuration.
 
-The fresh baseline covers accounts, seller applications/stores, seller listings, customer profiles, orders, immutable order-item snapshots, Paystack payment references and per-item fulfillment. It applies cleanly to an ephemeral PostgreSQL-compatible engine but has not been applied to a live database. It does not copy old MySQL rows; any preservation requires a separately planned export/transform/import.
+The fresh baseline covers accounts, seller applications/stores, seller listings, customer profiles, orders, immutable order-item snapshots, Paystack payment references and per-item fulfillment. The user-approved baseline has been applied to the new empty Neon Free-plan test project in London. This is test data only: no production database was changed, no old MySQL rows were copied, and any preservation requires a separately planned export/transform/import.
 
 ## Customer commerce and seller ownership
 
@@ -30,6 +30,8 @@ Paystack’s official documentation describes Nigeria-relevant channels and suba
 
 ## Deployment, database validation and remaining work
 
-No live Neon credentials, Paystack test secret, production OAuth callback or public Express API host have been supplied. The schema has not been applied to an active database and no database-backed end-to-end test has run. When credentials arrive, review the target database and legacy-data needs, apply migrations, then exercise OAuth/bootstrap, checkout retries, signed webhooks, stock reservation/release and seller ownership against it.
+The pooled Neon `DATABASE_URL` secret is stored in the Fly app; its value has not been read or copied into GitHub. The Neon baseline is applied, but database-backed application tests have not run because the Fly API is not deployed. Fly’s Depot build service timed out; the legacy builder was activated but could not connect to the CLI, so it was stopped to avoid ongoing charges. A local Docker test reached an architecture mismatch on the ARM sandbox. The repository now contains a manual GitHub Actions workflow that builds a short-lived x86_64 image artifact without Fly or database secrets; it has not yet been run. Only the intended Fly app record exists—no API VM is running. The Vercel project also remains to be created/deployed.
+
+Manus OAuth settings, Paystack test credentials and the final Vercel `APP_BASE_URL` still need configuration. After the API image is deployed, verify `/api/health` and a database-backed public catalog query, then deploy Vercel and test the same-origin API proxy and OAuth callbacks. Keep live commerce disabled until test-mode checkout, webhook handling and seller-money policy are verified.
 
 Before launch, automate scheduled reconciliation and escalation for abandoned/ambiguous transactions, implement refund/return and support/dispute workflows, seller commission and eligible payout accounting, image upload/storage, shipping-carrier integration and transactional customer notifications. Keep live commerce disabled until the Express backend is deployed with HTTPS, correct CORS/cookie/OAuth configuration, configured Paystack test webhooks and verified seller-money policy.

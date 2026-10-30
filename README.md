@@ -1,6 +1,6 @@
 # NaijaKoblas
 
-NaijaKoblas is a React storefront with an Express/tRPC backend, OAuth-backed customer and seller accounts, seller-owned listings, Neon Postgres persistence, per-item fulfillment and Paystack hosted checkout integration. The code is under active development; live commerce is not enabled until database, OAuth, Paystack test credentials and seller-settlement policy are configured.
+NaijaKoblas is a React storefront with an Express/tRPC backend, OAuth-backed customer and seller accounts, seller-owned listings, Neon Postgres persistence, per-item fulfillment and Paystack hosted checkout integration. The code is under active development; live commerce is not enabled until database-backed API tests, OAuth, Paystack test credentials and seller-settlement policy are verified.
 
 ## Local commands
 
@@ -15,7 +15,7 @@ NaijaKoblas is a React storefront with an Express/tRPC backend, OAuth-backed cus
 
 Copy `.env.example` to `.env`. Set `DATABASE_URL` to Neon’s pooled PostgreSQL URL for application traffic. Set `DATABASE_URL_UNPOOLED` to the direct Neon URL for schema migrations. Both values are secrets. The checked-in `drizzle/0000_initial_users.sql` and `drizzle/0001_tense_shape.sql` are legacy MySQL history and must not be applied to Neon; the PostgreSQL baseline is isolated in `drizzle/postgres/`.
 
-The current Postgres baseline is a fresh schema and was validated locally, but no production database migration has been applied. It does not copy existing MySQL records. If account or seller data must be preserved, export, transform and validate it separately before switching production traffic.
+The user-approved PostgreSQL baseline has been applied to the empty Neon Free-plan test project in London. It does not copy existing MySQL records. No production database was changed; if existing account or seller data must be preserved, export, transform and validate it separately before switching production traffic.
 
 ## First administrator
 
@@ -33,4 +33,8 @@ The buyer storefront reads published server listings and uses hosted checkout; t
 
 ## Deployment
 
-The current GitHub/Vercel configuration is a static SPA with a catch-all rewrite to `index.html`; it cannot serve Express OAuth, tRPC or Paystack webhook routes. Deploy the Express server with the storefront or configure a separate API host. For a separate API origin, set public build-time `VITE_API_BASE_URL` in the frontend and server-side `APP_BASE_URL` to the exact storefront origin; the backend allows credentialed CORS only for that origin. Configure HTTPS, cookies, OAuth callback and the Paystack webhook before test-mode validation. The health route checks process availability only, not database readiness.
+`fly.toml` configures the target Express API deployment in London on one shared 512 MB machine with HTTPS, `/api/health`, autostart on requests and stop-on-idle with zero minimum running machines. Fly’s builder paths timed out in this environment, so the target app currently has no image or VM deployed; the existing temporary 8-vCPU builder was stopped to prevent continued runtime charges. A manual GitHub Actions workflow builds a short-lived x86_64 image artifact without Fly or database secrets. See [Fly’s machine pricing](https://fly.io/pricing/), [resource pricing](https://docs.fly.io/about/pricing) and [configuration reference](https://docs.fly.io/reference/configuration) for current billing and auto-stop details.
+
+The pooled `DATABASE_URL` is stored in Fly Secrets; its value is not in Git or the Docker image. Manus OAuth and Paystack test secrets are not configured yet. The Fly app record `naijakoblas-api-test` exists, but no backend machine is running; database-backed API tests therefore have not been performed.
+
+`vercel.json` configures a static Vite build using `pnpm build:static` and `dist/public`. Its `/api/*` rewrite proxies to `https://naijakoblas-api-test.fly.dev` before the SPA fallback. The Vercel project has not yet been created or deployed. Keep `VITE_API_BASE_URL` unset so API requests, OAuth callbacks and session cookies remain same-origin at the eventual Vercel storefront. After creating the Vercel project, set server-side `APP_BASE_URL` to its exact HTTPS origin and verify Manus OAuth and Paystack callbacks. Do not enable customer transactions until test-mode integration is verified.

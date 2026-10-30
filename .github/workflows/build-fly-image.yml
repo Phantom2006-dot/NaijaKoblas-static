@@ -1,0 +1,33 @@
+name: Build Fly image artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build x86_64 Fly image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build application image
+        run: docker buildx build --platform linux/amd64 --load --tag naijakoblas-api-test:${{ github.sha }} .
+
+      - name: Save image artifact
+        run: docker save naijakoblas-api-test:${{ github.sha }} -o naijakoblas-api-test.tar
+
+      - name: Upload short-lived image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: naijakoblas-api-test-image
+          path: naijakoblas-api-test.tar
+          if-no-files-found: error
+          retention-days: 1
