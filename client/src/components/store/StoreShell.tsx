@@ -26,6 +26,7 @@ export function Navbar() {
     ["Contact Us", "/contact"],
     ["Become a Vendor", "/vendor"],
     ["Get Started", "/waitlist"],
+    ["Sign In", "/login"],
   ];
   return <header className="site-header">
     <div className="nav-inner container-wide">
