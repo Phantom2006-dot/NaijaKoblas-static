@@ -21,10 +21,10 @@ The application code uses Clerk only for user authentication. Clerk’s hosted R
 
 The dedicated **NaijaKoblas** Clerk development app is created. Email and password sign-up are enabled, email is required, and sign-up requires email verification by one-time code. Google sign-in is off. Passwords must be at least 15 characters and compromised-password rejection is enabled. A separate email-code sign-in option also remains enabled in Clerk.
 
-`VITE_CLERK_PUBLISHABLE_KEY` is saved in Vercel Production and is embedded into the static bundle at build time. Fly still has no Clerk server keys, so the public `/api/auth/status` reports `configured:false` and the login route correctly shows its setup notice rather than a broken sign-in form. After any Vercel environment change, verify a fresh Production deployment before testing login.
+`VITE_CLERK_PUBLISHABLE_KEY` is saved in Vercel Production. A READY production deployment now includes this public key in the static frontend bundle; a static scan confirmed no private Clerk secret pattern. Fly still has no Clerk server keys, so the public `/api/auth/status` reports `configured:false` and the login route correctly shows its setup notice rather than a broken sign-in form.
 
 1. Add the matching test `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` to Fly’s protected Secrets for `naijakoblas-static`. Enter the secret only in Fly’s protected UI—never in Git, `.env.example`, source files, logs or chat—and deploy the secrets only after both are present.
-2. Confirm Vercel’s latest Production deployment was built after the environment update; the public key must be in the frontend bundle.
+2. After any future Vercel environment change, verify a fresh Production deployment before testing login; the public key is embedded at build time.
 3. `APP_BASE_URL` already points to `https://naijakoblas-static.vercel.app`; the API validates Clerk’s authorized party against this exact origin. Partial Fly key pairs, a missing origin when Clerk is enabled, or a non-HTTPS production origin fail closed.
 4. After the owner signs up, configure `OWNER_CLERK_USER_ID` with that exact Clerk user ID in Fly Secrets. The one-time first-admin bootstrap promotes only that configured customer account, only if no administrator exists, and records an audit event. Do not guess or publish this ID.
 
