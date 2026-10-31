@@ -41,7 +41,7 @@ Paystack documents `abandoned` and `failed` as unsuccessful, and `reversed` as a
 
 ## Fly.io test hosting
 
-The test deployment configuration targets one London `shared-cpu-1x` 512 MB machine with HTTPS, a `/api/health` check, automatic start on incoming requests, and stop-on-idle with zero minimum running machines. Fly’s pricing varies by machine size and region and meters running time; stopped-machine storage and network charges should also be checked in the account’s current [Fly pricing](https://fly.io/pricing/) and [resource pricing](https://docs.fly.io/about/pricing) pages. The configuration keys used here are documented in Fly’s [configuration reference](https://docs.fly.io/reference/configuration).
+The selected test app `naijakoblas-static` is in Amsterdam and is configured for one `shared-cpu-1x` 512 MB machine with HTTPS, a `/api/health` check, automatic start on requests and stop-on-idle. Its first GitHub launch generated `internal_port = 8080`, while the Node process listens on `0.0.0.0:3000`; Fly reported a refused connection, so that machine was stopped. The launch also reported a public IPv6 allocation error. The repository’s manifest now sets port 3000; the corrected deploy and public IP still need verification. Fly meters running-machine time; check any current stopped-machine storage/network charges in [Fly pricing](https://fly.io/pricing/) and [resource pricing](https://docs.fly.io/about/pricing). Configuration behavior is documented in Fly’s [configuration reference](https://docs.fly.io/reference/configuration).
 
 ## References
 

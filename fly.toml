@@ -1,5 +1,5 @@
-app = "naijakoblas-api-test"
-primary_region = "lhr"
+app = "naijakoblas-static"
+primary_region = "ams"
 
 [build]
   dockerfile = "Dockerfile"

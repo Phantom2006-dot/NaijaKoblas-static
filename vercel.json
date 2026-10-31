@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://naijakoblas-api-test.fly.dev/api/:path*"
+      "destination": "https://naijakoblas-static.fly.dev/api/:path*"
     },
     {
       "source": "/(.*)",
