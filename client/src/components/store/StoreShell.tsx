@@ -1,8 +1,10 @@
 import { Link, useLocation } from "wouter";
 import { ArrowRight, Box, ChevronDown, Heart, House, Instagram, Linkedin, Menu, Search, ShoppingBag, Sparkles, UserRound, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore, type Product, money } from "@/store";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { NotificationBell } from "./NotificationBell";
 
 export function BrandMark({ light = false }: { light?: boolean }) {
   const { theme } = useTheme();
@@ -14,33 +16,86 @@ export function Navbar() {
   const [location, navigate] = useLocation();
   const { cartCount } = useStore();
   const { theme, toggleTheme } = useTheme();
+  const auth = useAuth();
   const [open, setOpen] = useState(false);
+  const navRef = useRef<HTMLElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     document.body.classList.toggle("menu-open", open);
-    return () => document.body.classList.remove("menu-open");
+    if (!open) return () => document.body.classList.remove("menu-open");
+
+    const focusFrame = window.requestAnimationFrame(() => navRef.current?.querySelector<HTMLAnchorElement>("a")?.focus());
+    const handleMenuKeyboard = (event: KeyboardEvent) => {
+      if (event.key === "Tab") {
+        const navigation = navRef.current;
+        const menuLinks = navigation ? Array.from(navigation.querySelectorAll<HTMLAnchorElement>('a[href]')) : [];
+        if (menuLinks.length === 0) return;
+        const first = menuLinks[0]!;
+        const last = menuLinks[menuLinks.length - 1]!;
+        const focusIsOutside = !navigation?.contains(document.activeElement);
+        if (event.shiftKey && (focusIsOutside || document.activeElement === first)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (focusIsOutside || document.activeElement === last)) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      menuButtonRef.current?.focus();
+    };
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (navRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
+      const element = target instanceof Element ? target : target.parentElement;
+      const clickedFocusable = element?.closest('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+      setOpen(false);
+      if (!clickedFocusable) {
+        window.requestAnimationFrame(() => {
+          const menuButton = menuButtonRef.current;
+          if (menuButton && menuButton.getClientRects().length > 0) menuButton.focus();
+          else navRef.current?.querySelector<HTMLAnchorElement>("a")?.focus();
+        });
+      }
+    };
+    document.addEventListener("keydown", handleMenuKeyboard);
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleMenuKeyboard);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.body.classList.remove("menu-open");
+    };
   }, [open]);
-  const links = [
+  const links: Array<[string, string]> = [
     ["Home", "/"],
     ["Products", "/products"],
     ["Why Koblas", "/about"],
     ["Contact Us", "/contact"],
     ["Become a Vendor", "/vendor"],
     ["Get Started", "/waitlist"],
-    ["Sign In", "/login"],
   ];
+  if (auth.user?.role === "seller") links.push(["Seller Workspace", "/seller"]);
+  if (auth.user?.role === "staff") links.push(["Staff Portal", "/staff"]);
+  links.push(auth.isAuthenticated ? ["Account", "/account"] : ["Sign In", "/login"]);
   return <header className="site-header">
     <div className="nav-inner container-wide">
       <BrandMark />
-      <nav className={`desktop-nav ${open ? "desktop-nav--open" : ""}`} aria-label="Main navigation">
-        {links.map(([label, href]) => <Link key={href} href={href} className={location === href ? "active" : ""} onClick={() => setOpen(false)}>{label}</Link>)}
+      <nav id="primary-navigation" ref={navRef} className={`desktop-nav ${open ? "desktop-nav--open" : ""}`} aria-label="Main navigation">
+        {links.map(([label, href]) => <Link key={href} href={href} className={location === href ? "active" : ""} onClick={() => { if (open) menuButtonRef.current?.focus(); setOpen(false); }}>{label}</Link>)}
       </nav>
       <div className="nav-actions">
         <button className="icon-button nav-search" aria-label="Search" onClick={() => navigate("/products")}><Search size={18} /></button>
         <button className="icon-button nav-theme" aria-label="Toggle theme" aria-pressed={theme === "dark"} onClick={() => toggleTheme?.()}><Sparkles size={17} /></button>
+        <NotificationBell />
         <Link href="/account" className="account-link">Account</Link>
         <Link href="/account" className="mobile-account-button" aria-label="Account"><UserRound size={18} /></Link>
         <Link href="/cart" className="cart-link" aria-label={`Cart with ${cartCount} items`}><ShoppingBag size={19} /><span>{cartCount}</span></Link>
-        <button className="icon-button mobile-menu-button" aria-label={open ? "Close menu" : "Open menu"} onClick={() => setOpen((value) => !value)}>{open ? <X size={22} /> : <Menu size={22} />}</button>
+        <button ref={menuButtonRef} type="button" className="icon-button mobile-menu-button" aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open} aria-controls="primary-navigation" onClick={() => setOpen((value) => !value)}>{open ? <X size={22} /> : <Menu size={22} />}</button>
       </div>
     </div>
   </header>;

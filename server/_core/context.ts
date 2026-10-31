@@ -15,7 +15,7 @@ export type TrpcContext = {
   user: User | null;
 };
 
-async function resolveClerkUser(req: CreateExpressContextOptions["req"]): Promise<User | null> {
+export async function resolveClerkUser(req: CreateExpressContextOptions["req"]): Promise<User | null> {
   const clerkConfig = getClerkServerConfig(ENV);
   if (!clerkConfig.enabled) return null;
 
@@ -42,7 +42,9 @@ async function resolveClerkUser(req: CreateExpressContextOptions["req"]): Promis
       lastSignedIn: new Date(),
     });
     user = await db.getUserByClerkId(clerkUserId);
-  } else if (ENV.ownerClerkUserId === clerkUserId && user.role === "customer") {
+  }
+
+  if (user && ENV.ownerClerkUserId === clerkUserId && user.role === "customer") {
     await db.ensureInitialAdminForClerkUser(clerkUserId);
     user = await db.getUserByClerkId(clerkUserId);
   }

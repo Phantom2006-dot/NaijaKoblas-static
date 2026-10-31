@@ -145,6 +145,24 @@ describe("Clerk request authentication", () => {
     expect(bootstrap).not.toHaveBeenCalled();
   });
 
+  it("bootstraps the configured owner on the first verified request after account creation", async () => {
+    configureClerk();
+    vi.stubEnv("OWNER_CLERK_USER_ID", "user_owner");
+    authenticate("user_owner");
+    setClerkIdentity("user_owner");
+    vi.spyOn(db, "getUserByClerkId")
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(account("user_owner", "customer"))
+      .mockResolvedValueOnce(account("user_owner", "admin"));
+    vi.spyOn(db, "upsertClerkUser").mockResolvedValue();
+    const bootstrap = vi.spyOn(db, "ensureInitialAdminForClerkUser").mockResolvedValue();
+
+    const context = await createContext(options());
+
+    expect(bootstrap).toHaveBeenCalledWith("user_owner");
+    expect(context.user?.role).toBe("admin");
+  });
+
   it("bootstraps only the configured owner Clerk ID and rereads the resulting role", async () => {
     configureClerk();
     vi.stubEnv("OWNER_CLERK_USER_ID", "user_owner");

@@ -76,8 +76,9 @@ function ClerkApplication() {
     status: "ready" as const,
     isLoaded,
     isSignedIn: Boolean(isSignedIn),
+    getToken,
     signOut: () => clerk.signOut({ redirectUrl: "/" }),
-  }), [clerk, isLoaded, isSignedIn]);
+  }), [clerk, getToken, isLoaded, isSignedIn]);
 
   return <AuthRuntimeContext.Provider value={runtime}>
     <TrpcApplication getToken={getToken} />

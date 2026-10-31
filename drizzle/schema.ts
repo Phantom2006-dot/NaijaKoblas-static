@@ -21,6 +21,7 @@ export const orderStatuses = ["pending_payment", "paid", "partially_fulfilled", 
 export const orderItemStatuses = ["unfulfilled", "processing", "shipped", "fulfilled"] as const;
 export const paymentStatuses = ["pending", "succeeded", "failed"] as const;
 export const deliveryMethods = ["standard", "express"] as const;
+export const sellerProductImageFormats = ["jpg", "png", "webp", "external"] as const;
 
 export const accountRoleEnum = pgEnum("account_role", accountRoles);
 export const sellerApplicationStatusEnum = pgEnum("seller_application_status", sellerApplicationStatuses);
@@ -89,6 +90,24 @@ export const accountAuditEvents = pgTable("accountAuditEvents", {
   actorCreatedIdx: index("accountAuditEvents_actor_createdAt_idx").on(table.actorUserId, table.createdAt),
 }));
 
+/** Marketplace notifications are private to one recipient and deduplicated by business event. */
+export const userNotifications = pgTable("userNotifications", {
+  id: serial("id").primaryKey(),
+  recipientUserId: integer("recipientUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  eventKey: varchar("eventKey", { length: 200 }).notNull(),
+  category: varchar("category", { length: 48 }).notNull(),
+  title: varchar("title", { length: 180 }).notNull(),
+  message: text("message").notNull(),
+  href: varchar("href", { length: 512 }).notNull(),
+  readAt: timestamp("readAt", { withTimezone: true, mode: "date" }),
+  createdAt: createdAt(),
+}, table => ({
+  recipientEventUnique: uniqueIndex("userNotifications_recipient_event_unique").on(table.recipientUserId, table.eventKey),
+  recipientCreatedIdx: index("userNotifications_recipient_createdAt_idx").on(table.recipientUserId, table.createdAt),
+  recipientUnreadIdx: index("userNotifications_recipient_unread_idx").on(table.recipientUserId, table.createdAt)
+    .where(sql`${table.readAt} IS NULL`),
+}));
+
 /** Customer-owned contact and shipping profile. Checkout snapshots these fields onto each order. */
 export const customerProfiles = pgTable("customerProfiles", {
   id: serial("id").primaryKey(),
@@ -134,6 +153,30 @@ export const sellerProducts = pgTable("sellerProducts", {
   publicCatalogIdx: index("sellerProducts_status_category_idx").on(table.status, table.category),
   positivePrice: check("sellerProducts_positive_price", sql`${table.priceKobo} > 0`),
   nonnegativeInventory: check("sellerProducts_nonnegative_inventory", sql`${table.inventoryCount} >= 0`),
+}));
+
+/** Product photographs live in durable external object storage; ownership remains on the listing. */
+export const sellerProductImages = pgTable("sellerProductImages", {
+  id: serial("id").primaryKey(),
+  productId: varchar("productId", { length: 64 }).notNull().references(() => sellerProducts.id, { onDelete: "cascade" }),
+  createdByUserId: integer("createdByUserId").references(() => users.id, { onDelete: "set null" }),
+  url: text("url").notNull(),
+  publicId: varchar("publicId", { length: 255 }).unique(),
+  assetId: varchar("assetId", { length: 64 }),
+  width: integer("width"),
+  height: integer("height"),
+  format: varchar("format", { length: 16 }).notNull(),
+  caption: varchar("caption", { length: 240 }),
+  displayOrder: integer("displayOrder").default(0).notNull(),
+  isPrimary: boolean("isPrimary").default(false).notNull(),
+  createdAt: createdAt(),
+}, table => ({
+  productOrderIdx: index("sellerProductImages_product_order_idx").on(table.productId, table.displayOrder),
+  productPrimaryUnique: uniqueIndex("sellerProductImages_product_primary_unique").on(table.productId)
+    .where(sql`${table.isPrimary} = true`),
+  nonnegativeOrder: check("sellerProductImages_nonnegative_order", sql`${table.displayOrder} >= 0`),
+  supportedFormat: check("sellerProductImages_supported_format", sql`${table.format} IN ('jpg', 'png', 'webp', 'external')`),
+  positiveDimensions: check("sellerProductImages_positive_dimensions", sql`(${table.width} IS NULL OR ${table.width} > 0) AND (${table.height} IS NULL OR ${table.height} > 0)`),
 }));
 
 /** Order records are private to the authenticated customer; amounts are stored in kobo. */
@@ -223,9 +266,12 @@ export type InsertUser = typeof users.$inferInsert;
 export type SellerApplication = typeof sellerApplications.$inferSelect;
 export type InsertSellerApplication = typeof sellerApplications.$inferInsert;
 export type AccountAuditEvent = typeof accountAuditEvents.$inferSelect;
+export type UserNotification = typeof userNotifications.$inferSelect;
 export type CustomerProfile = typeof customerProfiles.$inferSelect;
 export type SellerStore = typeof sellerStores.$inferSelect;
 export type SellerProduct = typeof sellerProducts.$inferSelect;
+export type SellerProductImage = typeof sellerProductImages.$inferSelect;
+export type SellerProductImageFormat = (typeof sellerProductImageFormats)[number];
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type PaymentTransaction = typeof paymentTransactions.$inferSelect;

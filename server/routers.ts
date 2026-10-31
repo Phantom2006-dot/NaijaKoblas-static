@@ -45,9 +45,6 @@ const sellerProductFields = {
   description: z.string().trim().min(20).max(5_000),
   category: z.string().trim().min(2).max(80),
   priceNaira: z.number().int().min(1).max(21_000_000),
-  imageUrl: z.string().trim().url().max(2_000)
-    .refine(value => new URL(value).protocol === "https:", "Product images must use HTTPS.")
-    .optional().nullable(),
   sizes: z.array(z.string().trim().min(1).max(40)).min(1).max(20),
   inventoryCount: z.number().int().min(0).max(1_000_000),
 };
@@ -82,6 +79,13 @@ export const appRouter = router({
     me: publicProcedure.query(opts => opts.ctx.user ? publicAccount(opts.ctx.user) : null),
   }),
 
+  notifications: router({
+    mine: protectedProcedure.query(({ ctx }) => db.listUserNotifications(ctx.user.id)),
+    markRead: protectedProcedure.input(z.object({ notificationId: z.number().int().positive() }))
+      .mutation(({ ctx, input }) => db.markUserNotificationRead(ctx.user.id, input.notificationId)),
+    markAllRead: protectedProcedure.mutation(({ ctx }) => db.markAllUserNotificationsRead(ctx.user.id)),
+  }),
+
   catalog: router({
     list: publicProcedure.query(() => db.listPublicSellerProducts()),
   }),
@@ -103,14 +107,7 @@ export const appRouter = router({
       }
       const existing = await db.getSellerApplicationByUserId(ctx.user.id);
       if (existing) throw new TRPCError({ code: "CONFLICT", message: "A seller application already exists for this account." });
-      const application = await db.createSellerApplication(ctx.user.id, input);
-      await db.createAccountAuditEvent({
-        actorUserId: ctx.user.id,
-        targetUserId: ctx.user.id,
-        eventType: "seller_application_submitted",
-        metadata: { applicationId: application?.id ?? null },
-      });
-      return application;
+      return db.createSellerApplication(ctx.user.id, input);
     }),
   }),
 
@@ -240,6 +237,14 @@ export const appRouter = router({
         throw error;
       }
     }),
+    setPrimaryImage: sellerProcedure.input(z.object({
+      productId: z.string().min(1).max(64),
+      imageId: z.number().int().positive(),
+    })).mutation(async ({ ctx, input }) => {
+      const image = await db.setSellerProductPrimaryImage({ sellerUserId: ctx.user.id, ...input });
+      if (!image) throw new TRPCError({ code: "NOT_FOUND", message: "Product image not found for this listing." });
+      return image;
+    }),
     orders: sellerProcedure.query(({ ctx }) => db.listOrdersForSeller(ctx.user.id)),
     fulfillmentOrders: protectedProcedure.query(async ({ ctx }) => {
       await assertSellerFulfillmentAccess(ctx.user);
@@ -272,6 +277,23 @@ export const appRouter = router({
   }),
 
   staff: router({
+    activeSellers: staffProcedure.query(() => db.listActiveSellersForStaff()),
+    createProductForSeller: staffProcedure.input(z.object({
+      sellerUserId: z.number().int().positive(),
+      product: z.object(sellerProductFields),
+    })).mutation(async ({ ctx, input }) => {
+      const { priceNaira, ...product } = input.product;
+      try {
+        return await db.createProductForStaff({
+          actorUserId: ctx.user.id,
+          sellerUserId: input.sellerUserId,
+          product: { ...product, priceKobo: priceNaira * 100 },
+        });
+      } catch (error) {
+        if (error instanceof db.CommerceValidationError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        throw error;
+      }
+    }),
     sellerApplications: staffProcedure.input(z.object({ status: z.enum(["pending", "approved", "rejected", "suspended"]).optional() }).optional()).query(async ({ input }) =>
       db.listSellerApplications(input?.status),
     ),

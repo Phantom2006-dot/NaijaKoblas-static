@@ -8,6 +8,20 @@
       "when": 1793371143692,
       "tag": "0000_thick_psylocke",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793465227791,
+      "tag": "0001_married_dagger",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793466169577,
+      "tag": "0002_aspiring_iceman",
+      "breakpoints": true
     }
   ]
 }

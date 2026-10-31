@@ -4,6 +4,10 @@ primary_region = "ams"
 [build]
   dockerfile = "Dockerfile"
 
+[deploy]
+  release_command = "node dist/migrations/run.js"
+  release_command_timeout = "5m"
+
 [env]
   NODE_ENV = "production"
   PORT = "3000"

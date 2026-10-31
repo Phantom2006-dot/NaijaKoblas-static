@@ -4,6 +4,7 @@ import { createServer } from "http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { clerkMiddleware } from "@clerk/express";
 import { registerPaymentRoutes } from "../payments/routes";
+import { registerProductUploadRoutes } from "../uploads/routes";
 import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -61,6 +62,7 @@ async function startServer() {
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());
   });
+  registerProductUploadRoutes(app);
   registerPaymentRoutes(app);
   app.use(
     "/api/trpc",

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, gt, inArray, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -9,9 +9,11 @@ import {
   orders,
   orderItems,
   paymentTransactions,
+  sellerProductImages,
   sellerApplications,
   sellerProducts,
   sellerStores,
+  userNotifications,
   users,
   type AccountRole,
   type DeliveryMethod,
@@ -23,6 +25,8 @@ import { ENV } from "./_core/env";
 import { canTransitionFulfillment, deriveFulfillmentOrderStatus, type FulfillmentStatus } from "./commerce/fulfillment";
 import { checkoutFingerprint } from "./commerce/idempotency";
 import { calculateCheckoutAmounts } from "./commerce/pricing";
+import { hasPrimaryProductImage, MAX_PRODUCT_IMAGES_PER_LISTING } from "./commerce/product-upload";
+import { notificationEventKey } from "./commerce/notifications";
 
 function hasPostgresConstraint(error: unknown, constraint: string, seen = new Set<object>()): boolean {
   if (!error || typeof error !== "object" || seen.has(error)) return false;
@@ -229,8 +233,37 @@ export async function getSellerApplicationById(id: number) {
 
 export async function createSellerApplication(userId: number, input: SellerApplicationInput) {
   const database = await requireDb();
-  await database.insert(sellerApplications).values({ userId, ...input, status: "pending" });
-  return getSellerApplicationByUserId(userId);
+  return database.transaction(async tx => {
+    const inserted = await tx.insert(sellerApplications).values({ userId, ...input, status: "pending" }).returning();
+    const application = inserted[0];
+    if (!application) throw new Error("Seller application could not be created.");
+    await tx.insert(accountAuditEvents).values({
+      actorUserId: userId,
+      targetUserId: userId,
+      eventType: "seller_application_submitted",
+      metadata: { applicationId: application.id },
+    });
+    const staffUsers = await tx.select({ id: users.id }).from(users).where(inArray(users.role, ["staff", "admin"]));
+    await tx.insert(userNotifications).values([
+      ...staffUsers.map(staff => ({
+        recipientUserId: staff.id,
+        eventKey: notificationEventKey("seller-application", application.id, "submitted"),
+        category: "seller_application" as const,
+        title: "New seller application",
+        message: `${application.businessName} submitted a seller application for review.`,
+        href: "/staff",
+      })),
+      {
+        recipientUserId: userId,
+        eventKey: notificationEventKey("seller-application", application.id, "received"),
+        category: "seller_application" as const,
+        title: "Seller application received",
+        message: "Your application is in review. We will notify you when the partnerships team records a decision.",
+        href: "/account",
+      },
+    ]).onConflictDoNothing();
+    return application;
+  });
 }
 
 export async function listSellerApplications(status?: SellerApplicationStatus) {
@@ -272,12 +305,13 @@ export async function transitionSellerApplication(input: {
     if (applicant.role === "staff" || applicant.role === "admin") {
       return { success: false as const, reason: "privileged_account" as const };
     }
+    const updatedAt = new Date();
     const updated = await tx.update(sellerApplications).set({
       status: input.status,
       reviewNote: input.reviewNote || null,
       reviewedByUserId: input.reviewerUserId,
-      reviewedAt: new Date(),
-      updatedAt: new Date(),
+      reviewedAt: updatedAt,
+      updatedAt,
     }).where(and(
       eq(sellerApplications.id, input.applicationId),
       eq(sellerApplications.status, application.status),
@@ -306,6 +340,18 @@ export async function transitionSellerApplication(input: {
       eventType: "seller_application_status_changed",
       metadata: { applicationId: application.id, from: application.status, to: input.status },
     });
+    await tx.insert(userNotifications).values({
+      recipientUserId: application.userId,
+      eventKey: notificationEventKey("seller-application", application.id, "status", input.status, updatedAt.getTime()),
+      category: "seller_application",
+      title: input.status === "approved" ? "Seller application approved" : input.status === "suspended" ? "Seller access paused" : "Seller application update",
+      message: input.status === "approved"
+        ? "Your seller application was approved. Your seller workspace is ready."
+        : input.status === "suspended"
+          ? "Seller access is paused. Existing paid order fulfillment remains available."
+          : "Your seller application was not approved. Contact the partnerships team for next steps.",
+      href: input.status === "approved" ? "/seller" : "/account",
+    }).onConflictDoNothing();
     const reviewed = await tx.select().from(sellerApplications)
       .where(eq(sellerApplications.id, input.applicationId)).limit(1);
     return { success: true as const, application: reviewed[0]! };
@@ -339,22 +385,17 @@ export async function changeStaffAccess(input: {
       metadata: { from: expectedRole, to: nextRole },
     });
     const result = await tx.select().from(users).where(eq(users.id, input.targetUserId)).limit(1);
+    await tx.insert(userNotifications).values({
+      recipientUserId: input.targetUserId,
+      eventKey: notificationEventKey("account", input.targetUserId, "role", nextRole, result[0]!.updatedAt.getTime()),
+      category: "account",
+      title: nextRole === "staff" ? "Staff access granted" : "Staff access changed",
+      message: nextRole === "staff"
+        ? "An administrator granted your account access to the staff review workspace."
+        : "An administrator removed staff workspace access from your account.",
+      href: nextRole === "staff" ? "/staff" : "/account",
+    }).onConflictDoNothing();
     return { success: true as const, user: result[0]! };
-  });
-}
-
-export async function createAccountAuditEvent(input: {
-  actorUserId?: number | null;
-  targetUserId?: number | null;
-  eventType: string;
-  metadata?: Record<string, unknown>;
-}) {
-  const database = await requireDb();
-  await database.insert(accountAuditEvents).values({
-    actorUserId: input.actorUserId ?? null,
-    targetUserId: input.targetUserId ?? null,
-    eventType: input.eventType,
-    metadata: input.metadata ?? null,
   });
 }
 
@@ -389,15 +430,44 @@ export type SellerProductInput = {
   description: string;
   category: string;
   priceKobo: number;
-  imageUrl?: string | null;
   sizes: string[];
   inventoryCount: number;
 };
 
+async function listGalleryImages(database: Database, productIds: string[]) {
+  if (productIds.length === 0) return new Map<string, Array<{
+    id: number;
+    url: string;
+    caption: string | null;
+    displayOrder: number;
+    isPrimary: boolean;
+    width: number | null;
+    height: number | null;
+    format: string;
+  }>>();
+  const rows = await database.select({
+    id: sellerProductImages.id,
+    productId: sellerProductImages.productId,
+    url: sellerProductImages.url,
+    caption: sellerProductImages.caption,
+    displayOrder: sellerProductImages.displayOrder,
+    isPrimary: sellerProductImages.isPrimary,
+    width: sellerProductImages.width,
+    height: sellerProductImages.height,
+    format: sellerProductImages.format,
+  }).from(sellerProductImages).where(inArray(sellerProductImages.productId, productIds))
+    .orderBy(asc(sellerProductImages.displayOrder), asc(sellerProductImages.id));
+  const grouped = new Map<string, typeof rows>();
+  for (const image of rows) grouped.set(image.productId, [...(grouped.get(image.productId) ?? []), image]);
+  return grouped;
+}
+
 export async function listSellerProducts(sellerUserId: number) {
   const database = await requireDb();
-  return database.select().from(sellerProducts).where(eq(sellerProducts.sellerUserId, sellerUserId))
+  const products = await database.select().from(sellerProducts).where(eq(sellerProducts.sellerUserId, sellerUserId))
     .orderBy(desc(sellerProducts.updatedAt)).limit(100);
+  const gallery = await listGalleryImages(database, products.map(product => product.id));
+  return products.map(product => ({ ...product, images: gallery.get(product.id) ?? [] }));
 }
 
 export async function createSellerProduct(sellerUserId: number, input: SellerProductInput) {
@@ -407,10 +477,72 @@ export async function createSellerProduct(sellerUserId: number, input: SellerPro
     id,
     sellerUserId,
     ...input,
-    imageUrl: input.imageUrl ?? null,
+    imageUrl: null,
     status: "draft",
   }).returning();
   return result[0]!;
+}
+
+export async function listActiveSellersForStaff() {
+  const database = await requireDb();
+  return database.select({
+    userId: users.id,
+    businessName: sellerApplications.businessName,
+    displayName: sellerStores.displayName,
+    city: sellerStores.city,
+  }).from(users)
+    .innerJoin(sellerApplications, eq(sellerApplications.userId, users.id))
+    .innerJoin(sellerStores, eq(sellerStores.userId, users.id))
+    .where(and(
+      eq(users.role, "seller"),
+      eq(sellerApplications.status, "approved"),
+      eq(sellerStores.isActive, true),
+    )).orderBy(asc(sellerStores.displayName)).limit(200);
+}
+
+export async function createProductForStaff(input: {
+  actorUserId: number;
+  sellerUserId: number;
+  product: SellerProductInput;
+}) {
+  const database = await requireDb();
+  return database.transaction(async tx => {
+    const seller = await tx.select({ userId: users.id })
+      .from(users)
+      .innerJoin(sellerApplications, eq(sellerApplications.userId, users.id))
+      .innerJoin(sellerStores, eq(sellerStores.userId, users.id))
+      .where(and(
+        eq(users.id, input.sellerUserId),
+        eq(users.role, "seller"),
+        eq(sellerApplications.status, "approved"),
+        eq(sellerStores.isActive, true),
+      )).limit(1).for("update");
+    if (!seller[0]) throw new CommerceValidationError("Choose an approved seller with an active store.");
+
+    const id = `prod_${randomUUID().replaceAll("-", "")}`;
+    const created = await tx.insert(sellerProducts).values({
+      id,
+      sellerUserId: input.sellerUserId,
+      ...input.product,
+      imageUrl: null,
+      status: "draft",
+    }).returning();
+    await tx.insert(accountAuditEvents).values({
+      actorUserId: input.actorUserId,
+      targetUserId: input.sellerUserId,
+      eventType: "staff_created_seller_product_draft",
+      metadata: { productId: id },
+    });
+    await tx.insert(userNotifications).values({
+      recipientUserId: input.sellerUserId,
+      eventKey: `product:${id}:staff-draft-created`,
+      category: "listing",
+      title: "A draft listing is ready for your review",
+      message: "A staff member added a draft listing to your store. Review its details and publish it from your seller workspace.",
+      href: "/seller",
+    }).onConflictDoNothing();
+    return created[0]!;
+  });
 }
 
 export async function getSellerStoreByUserId(userId: number) {
@@ -418,6 +550,139 @@ export async function getSellerStoreByUserId(userId: number) {
   if (!database) return undefined;
   const result = await database.select().from(sellerStores).where(eq(sellerStores.userId, userId)).limit(1);
   return result[0];
+}
+
+export async function getProductUploadTarget(productId: string) {
+  const database = await getDb();
+  if (!database) return undefined;
+  const rows = await database.select({
+    product: sellerProducts,
+    sellerRole: users.role,
+    applicationStatus: sellerApplications.status,
+    storeActive: sellerStores.isActive,
+  }).from(sellerProducts)
+    .innerJoin(users, eq(users.id, sellerProducts.sellerUserId))
+    .leftJoin(sellerApplications, eq(sellerApplications.userId, users.id))
+    .leftJoin(sellerStores, eq(sellerStores.userId, users.id))
+    .where(eq(sellerProducts.id, productId)).limit(1);
+  return rows[0];
+}
+
+export type NewProductImage = {
+  url: string;
+  publicId: string;
+  assetId: string | null;
+  width: number;
+  height: number;
+  format: "jpg" | "png" | "webp";
+};
+
+export async function addSellerProductImages(input: {
+  actorUserId: number;
+  sellerUserId: number;
+  productId: string;
+  images: NewProductImage[];
+}) {
+  if (!input.images.length) throw new CommerceValidationError("Select at least one product image.");
+  const database = await requireDb();
+  return database.transaction(async tx => {
+    const actorRows = await tx.select({ id: users.id, role: users.role }).from(users)
+      .where(eq(users.id, input.actorUserId)).limit(1).for("update");
+    const actor = actorRows[0];
+    const isSellerOwner = actor?.role === "seller" && actor.id === input.sellerUserId;
+    const isMarketplaceStaff = actor?.role === "staff" || actor?.role === "admin";
+    if (!isSellerOwner && !isMarketplaceStaff) throw new CommerceValidationError("The current account cannot upload seller product images.");
+
+    const sellerRows = await tx.select({ role: users.role, status: sellerApplications.status, storeActive: sellerStores.isActive })
+      .from(users).innerJoin(sellerApplications, eq(sellerApplications.userId, users.id))
+      .innerJoin(sellerStores, eq(sellerStores.userId, users.id))
+      .where(eq(users.id, input.sellerUserId)).limit(1).for("update");
+    const seller = sellerRows[0];
+    if (seller?.role !== "seller" || seller.status !== "approved" || !seller.storeActive) {
+      throw new CommerceValidationError("Product images can only be added to an approved seller with an active store.");
+    }
+
+    const productRows = await tx.select().from(sellerProducts).where(and(
+      eq(sellerProducts.id, input.productId),
+      eq(sellerProducts.sellerUserId, input.sellerUserId),
+    )).limit(1).for("update");
+    const product = productRows[0];
+    if (!product) throw new CommerceValidationError("The product listing is not owned by the selected seller.");
+
+    const existing = await tx.select({ id: sellerProductImages.id, isPrimary: sellerProductImages.isPrimary })
+      .from(sellerProductImages).where(eq(sellerProductImages.productId, input.productId));
+    if (existing.length + input.images.length > MAX_PRODUCT_IMAGES_PER_LISTING) {
+      throw new CommerceValidationError(`A listing can contain at most ${MAX_PRODUCT_IMAGES_PER_LISTING} images.`);
+    }
+    const chooseFirstAsPrimary = !existing.some(image => image.isPrimary);
+    const now = new Date();
+    const values = input.images.map((image, index) => ({
+      productId: input.productId,
+      createdByUserId: input.actorUserId,
+      ...image,
+      displayOrder: existing.length + index,
+      isPrimary: chooseFirstAsPrimary && index === 0,
+      createdAt: now,
+    }));
+    const inserted = await tx.insert(sellerProductImages).values(values).returning({
+      id: sellerProductImages.id,
+      url: sellerProductImages.url,
+      caption: sellerProductImages.caption,
+      displayOrder: sellerProductImages.displayOrder,
+      isPrimary: sellerProductImages.isPrimary,
+      width: sellerProductImages.width,
+      height: sellerProductImages.height,
+      format: sellerProductImages.format,
+    });
+    if (chooseFirstAsPrimary && inserted[0]) {
+      await tx.update(sellerProducts).set({ imageUrl: inserted[0].url, updatedAt: now })
+        .where(and(eq(sellerProducts.id, input.productId), eq(sellerProducts.sellerUserId, input.sellerUserId)));
+    }
+    if (input.actorUserId !== input.sellerUserId) {
+      await tx.insert(accountAuditEvents).values({
+        actorUserId: input.actorUserId,
+        targetUserId: input.sellerUserId,
+        eventType: "staff_uploaded_seller_product_images",
+        metadata: { productId: input.productId, imageCount: inserted.length },
+      });
+      await tx.insert(userNotifications).values({
+        recipientUserId: input.sellerUserId,
+        eventKey: notificationEventKey("product", input.productId, "staff-images", inserted[0]!.id),
+        category: "listing",
+        title: "Product photos were added to your draft",
+        message: "A staff member uploaded photos for your listing. Review the draft in your seller workspace before publishing it.",
+        href: "/seller",
+      }).onConflictDoNothing();
+    }
+    return inserted;
+  });
+}
+
+export async function setSellerProductPrimaryImage(input: { sellerUserId: number; productId: string; imageId: number }) {
+  const database = await requireDb();
+  return database.transaction(async tx => {
+    const products = await tx.select({ id: sellerProducts.id }).from(sellerProducts).where(and(
+      eq(sellerProducts.id, input.productId),
+      eq(sellerProducts.sellerUserId, input.sellerUserId),
+    )).limit(1).for("update");
+    if (!products[0]) return undefined;
+    const images = await tx.select().from(sellerProductImages).where(and(
+      eq(sellerProductImages.id, input.imageId),
+      eq(sellerProductImages.productId, input.productId),
+    )).limit(1);
+    const image = images[0];
+    if (!image) return undefined;
+    await tx.update(sellerProductImages).set({ isPrimary: false }).where(eq(sellerProductImages.productId, input.productId));
+    await tx.update(sellerProductImages).set({ isPrimary: true }).where(and(
+      eq(sellerProductImages.id, input.imageId),
+      eq(sellerProductImages.productId, input.productId),
+    ));
+    await tx.update(sellerProducts).set({ imageUrl: image.url, updatedAt: new Date() }).where(and(
+      eq(sellerProducts.id, input.productId),
+      eq(sellerProducts.sellerUserId, input.sellerUserId),
+    ));
+    return { ...image, isPrimary: true };
+  });
 }
 
 export async function updateSellerProduct(input: {
@@ -452,6 +717,13 @@ export async function updateSellerProduct(input: {
       const store = stores[0];
       if (!store?.isActive) throw new CommerceValidationError("The seller store is not active.");
       if (available < 1) throw new CommerceValidationError("A listing needs available stock before it can be published.");
+      const primaryImages = await tx.select({ isPrimary: sellerProductImages.isPrimary })
+        .from(sellerProductImages)
+        .where(and(eq(sellerProductImages.productId, input.productId), eq(sellerProductImages.isPrimary, true)))
+        .limit(1);
+      if (!hasPrimaryProductImage(primaryImages)) {
+        throw new CommerceValidationError("Add and select a primary product photo before publishing this listing.");
+      }
     }
 
     const result = await tx.update(sellerProducts).set({
@@ -467,7 +739,7 @@ export async function updateSellerProduct(input: {
 
 export async function listPublicSellerProducts() {
   const database = await requireDb();
-  return database.select({
+  const products = await database.select({
     id: sellerProducts.id,
     name: sellerProducts.name,
     description: sellerProducts.description,
@@ -485,6 +757,11 @@ export async function listPublicSellerProducts() {
       gte(sellerProducts.inventoryCount, 1),
       eq(sellerStores.isActive, true),
     )).orderBy(desc(sellerProducts.createdAt)).limit(200);
+  const gallery = await listGalleryImages(database, products.map(product => product.id));
+  return products.map(product => ({
+    ...product,
+    images: (gallery.get(product.id) ?? []).map(image => image.url),
+  }));
 }
 
 export type CheckoutItemInput = { productId: string; quantity: number; size: string };
@@ -755,6 +1032,27 @@ export async function markPaymentSucceeded(input: {
         source: input.actorUserId ? "admin_reconciliation" : "provider_verification",
       },
     });
+    const orderLines = await tx.select({ sellerUserId: orderItems.sellerUserId }).from(orderItems)
+      .where(eq(orderItems.orderId, record.order.id));
+    const sellerUserIds = [...new Set(orderLines.map(line => line.sellerUserId))];
+    await tx.insert(userNotifications).values([
+      {
+        recipientUserId: record.order.customerUserId,
+        eventKey: notificationEventKey("order", record.order.id, "paid", "customer"),
+        category: "payment",
+        title: "Payment confirmed",
+        message: `Payment for order ${record.order.reference} is confirmed. You can review the order in your account.`,
+        href: "/account",
+      },
+      ...sellerUserIds.map(sellerUserId => ({
+        recipientUserId: sellerUserId,
+        eventKey: notificationEventKey("order", record.order.id, "paid", "seller", sellerUserId),
+        category: "order",
+        title: "A customer order is ready",
+        message: `Order ${record.order.reference} is paid and has items assigned to your store.`,
+        href: "/seller",
+      })),
+    ]).onConflictDoNothing();
     return { success: true as const, alreadyProcessed: false };
     });
   } catch (error) {
@@ -800,6 +1098,14 @@ export async function markPaymentFailed(reference: string, actorUserId?: number)
         source: actorUserId ? "admin_reconciliation" : "provider_verification",
       },
     });
+    await tx.insert(userNotifications).values({
+      recipientUserId: record.order.customerUserId,
+      eventKey: notificationEventKey("order", record.order.id, "payment-failed"),
+      category: "payment",
+      title: "Payment was not completed",
+      message: `Payment for order ${record.order.reference} was verified as unsuccessful and reserved stock was released.`,
+      href: "/account",
+    }).onConflictDoNothing();
     return true;
   });
 }
@@ -893,6 +1199,53 @@ export async function updateSellerOrderItemFulfillment(input: {
         trackingNumber: updatedItem.trackingNumber,
       },
     });
+    await tx.insert(userNotifications).values({
+      recipientUserId: record.order.customerUserId,
+      eventKey: notificationEventKey("order", record.order.id, "item", updatedItem.id, "fulfillment", input.status),
+      category: "fulfillment",
+      title: "Order fulfillment updated",
+      message: `${updatedItem.nameSnapshot} is now marked ${input.status.replaceAll("_", " ")}.`,
+      href: "/account",
+    }).onConflictDoNothing();
     return { success: true as const, item: updatedItem, orderStatus: nextOrderStatus };
   });
+}
+
+
+export async function listUserNotifications(userId: number) {
+  const database = await requireDb();
+  const [items, unreadRows] = await Promise.all([
+    database.select({
+      id: userNotifications.id,
+      category: userNotifications.category,
+      title: userNotifications.title,
+      message: userNotifications.message,
+      href: userNotifications.href,
+      readAt: userNotifications.readAt,
+      createdAt: userNotifications.createdAt,
+    }).from(userNotifications).where(eq(userNotifications.recipientUserId, userId))
+      .orderBy(desc(userNotifications.createdAt), desc(userNotifications.id)).limit(50),
+    database.select({ count: sql<number>`count(*)` }).from(userNotifications)
+      .where(and(eq(userNotifications.recipientUserId, userId), isNull(userNotifications.readAt))),
+  ]);
+  return { items, unreadCount: Number(unreadRows[0]?.count ?? 0) };
+}
+
+export async function markUserNotificationRead(userId: number, notificationId: number) {
+  const database = await requireDb();
+  const changed = await database.update(userNotifications).set({ readAt: new Date() }).where(and(
+    eq(userNotifications.id, notificationId),
+    eq(userNotifications.recipientUserId, userId),
+    isNull(userNotifications.readAt),
+  )).returning({ id: userNotifications.id });
+  return changed.length === 1;
+}
+
+export async function markAllUserNotificationsRead(userId: number) {
+  const database = await requireDb();
+  const changed = await database.update(userNotifications).set({ readAt: new Date() }).where(and(
+    eq(userNotifications.recipientUserId, userId),
+    isNull(userNotifications.readAt),
+  )).returning({ id: userNotifications.id });
+  return changed.length;
 }

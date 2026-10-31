@@ -8,6 +8,7 @@ export type Product = {
   maker: string;
   price: number;
   image: string;
+  images?: string[];
   badge?: "New" | "Popular" | "Limited";
   description: string;
   rating?: number;
@@ -190,19 +191,23 @@ const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const catalogQuery = trpc.catalog.list.useQuery(undefined, { retry: false });
-  const catalogProducts = useMemo<Product[]>(() => (catalogQuery.data ?? []).map(product => ({
-    id: product.id,
-    name: product.name,
-    category: product.category,
-    maker: product.maker,
-    price: product.priceKobo / 100,
-    image: product.imageUrl ?? "/naijakoblas-hero.jpg",
-    description: product.description,
-    sizes: product.sizes,
-    experience: product.city ? `${product.city}, Nigeria` : "Nigeria",
-    color: "Brown",
-    inventoryCount: product.inventoryCount,
-  })), [catalogQuery.data]);
+  const catalogProducts = useMemo<Product[]>(() => (catalogQuery.data ?? []).map(product => {
+    const images = [...new Set([product.imageUrl, ...(product.images ?? [])].filter((image): image is string => Boolean(image)))];
+    return {
+      id: product.id,
+      name: product.name,
+      category: product.category,
+      maker: product.maker,
+      price: product.priceKobo / 100,
+      image: images[0] ?? "/naijakoblas-hero.jpg",
+      images,
+      description: product.description,
+      sizes: product.sizes,
+      experience: product.city ? `${product.city}, Nigeria` : "Nigeria",
+      color: "Brown",
+      inventoryCount: product.inventoryCount,
+    };
+  }), [catalogQuery.data]);
   const [cart, setCart] = useState<CartLine[]>(() => {
     try {
       const saved = localStorage.getItem("koblas-cart");

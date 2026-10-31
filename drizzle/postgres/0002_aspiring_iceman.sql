@@ -1,0 +1,1 @@
+ALTER TABLE "sellerProductImages" ADD CONSTRAINT "sellerProductImages_supported_format" CHECK ("sellerProductImages"."format" IN ('jpg', 'png', 'webp', 'external'));

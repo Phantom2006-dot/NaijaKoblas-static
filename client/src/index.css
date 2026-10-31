@@ -904,8 +904,9 @@ body { background: var(--ref-bg); color: var(--ref-text); }
   .catalog-page-head h1 { font-size: 26px; }
   .catalog-layout { display: block; padding-top: 0; padding-bottom: 45px; }
   .filter-sidebar { display: none; position: fixed; z-index: 40; inset: 0; padding: 0 17px 16px; overflow: auto; background: var(--ref-deep); border: 0; }
-  .filter-sidebar.filter-sidebar--open { display: block; }
-  .filter-mobile-heading { height: 58px; display: flex; align-items: center; justify-content: space-between; margin: 0 -17px 17px; padding: 0 17px; border-bottom: 1px solid var(--ref-line); }
+.filter-sidebar.filter-sidebar--open { display: block; }
+body.filter-drawer-open { overflow: hidden; }
+.filter-mobile-heading { height: 58px; display: flex; align-items: center; justify-content: space-between; margin: 0 -17px 17px; padding: 0 17px; border-bottom: 1px solid var(--ref-line); }
   .filter-mobile-heading strong { color: var(--ref-text); font-family: Syne, sans-serif; font-size: 16px; }
   .filter-mobile-heading button { color: var(--ref-text); }
   .sidebar-field, .sidebar-section { padding-bottom: 20px; margin-bottom: 19px; }
@@ -1596,6 +1597,10 @@ html:not(.dark) .spotlight.section::before { background-color: var(--ref-bg); }
 .brand-mark:focus-visible {
   outline: 2px solid var(--ref-green);
   outline-offset: 4px;
+}
+:where(body) :is(a, button, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid var(--ref-green) !important;
+  outline-offset: 3px;
 }
 .button:active,
 .icon-button:active,

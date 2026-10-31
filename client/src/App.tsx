@@ -1,17 +1,21 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { StoreProvider } from "./store";
 import { StoreShell } from "./components/store/StoreShell";
 import { AboutPage, CartPage, CheckoutPage, ContactPage, HomePage, InfoPage, OrderConfirmationPage, ProductDetailPage, ProductsPage, VendorPage, WaitlistPage } from "./pages/StorePages";
-import { AccountPage, AdminDashboardPage, SellerDashboardPage, StaffDashboardPage, SuspendedSellerFulfillmentPage } from "./pages/AccountPages";
+import { AccountPage, SuspendedSellerFulfillmentPage } from "./pages/AccountPages";
 import { AuthPage } from "./pages/AuthPage";
+import { AdminAccessPage } from "./pages/AdminAccessPage";
+import { SellerWorkspacePage } from "./pages/SellerWorkspacePage";
+import { StaffWorkspacePage } from "./pages/StaffWorkspacePage";
 
 function Router() {
-  return <StoreShell><Switch>
+  const [location] = useLocation();
+  const routes = <Switch>
     <Route path="/" component={HomePage} />
     <Route path="/products" component={ProductsPage} />
     <Route path="/products/:id" component={ProductDetailPage} />
@@ -26,13 +30,14 @@ function Router() {
     <Route path="/waitlist" component={WaitlistPage} />
     <Route path="/account" component={AccountPage} />
     <Route path="/seller-fulfillment" component={SuspendedSellerFulfillmentPage} />
-    <Route path="/seller" component={SellerDashboardPage} />
-    <Route path="/staff" component={StaffDashboardPage} />
-    <Route path="/admin" component={AdminDashboardPage} />
+    <Route path="/seller" component={SellerWorkspacePage} />
+    <Route path="/staff" component={StaffWorkspacePage} />
+    <Route path="/admin" component={AdminAccessPage} />
     <Route path="/info/:topic" component={InfoPage} />
     <Route path="/404" component={NotFound} />
     <Route component={NotFound} />
-  </Switch></StoreShell>;
+  </Switch>;
+  return location === "/admin" || location.startsWith("/admin/") ? routes : <StoreShell>{routes}</StoreShell>;
 }
 
 export default function App() {

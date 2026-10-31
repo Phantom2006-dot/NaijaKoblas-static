@@ -12,6 +12,7 @@ export type AuthRuntimeValue = {
   status: AuthRuntimeStatus;
   isLoaded: boolean;
   isSignedIn: boolean;
+  getToken?: () => Promise<string | null>;
   signOut?: () => Promise<void>;
 };
 

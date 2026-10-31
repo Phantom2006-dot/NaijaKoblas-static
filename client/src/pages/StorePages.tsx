@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { ArrowDownRight, ArrowLeft, ArrowRight, BadgeCheck, Check, ChevronDown, Clock3, Heart, Instagram, Mail, MapPin, Minus, PackageCheck, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal, Sparkles, Star, Truck, UserRound, X } from "lucide-react";
 import { Breadcrumb, PageIntro, Pill, ProductCard, SectionHeading, TrustStrip } from "@/components/store/StoreShell";
-import { money, products, useStore } from "@/store";
+import { money, products, useStore, type Product } from "@/store";
 import { useTheme } from "@/contexts/ThemeContext";
 import { trpc } from "@/lib/trpc";
 import { startLogin } from "@/const";
@@ -30,6 +30,18 @@ export function HomePage() {
 
 function ArrowUpRight() { return <ArrowRight className="arrow-up-right" size={21} />; }
 
+function ProductGallery({ product }: { product: Product }) {
+  const images = product.images?.length ? product.images : [product.image];
+  const [activeImage, setActiveImage] = useState(images[0] ?? product.image);
+  useEffect(() => setActiveImage(images[0] ?? product.image), [product.id, product.image, images[0]]);
+  return <div className="detail-gallery">
+    <div className="detail-image"><img src={activeImage} alt={product.name} /></div>
+    {images.length > 1 && <div className="detail-thumbnails" aria-label={`${images.length} product photos`}>
+      {images.map((image, index) => <button key={`${image}-${index}`} type="button" className={activeImage === image ? "selected" : ""} aria-label={`Show product photo ${index + 1}`} aria-pressed={activeImage === image} onClick={() => setActiveImage(image)}><img src={image} alt="" loading="lazy" /></button>)}
+    </div>}
+  </div>;
+}
+
 export function ProductsPage() {
   const [, navigate] = useLocation();
   const { catalogProducts, catalogLoading, catalogError } = useStore();
@@ -38,6 +50,9 @@ export function ProductsPage() {
   const [category, setCategory] = useState(initialCategory);
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  const filterTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const filterCloseRef = useRef<HTMLButtonElement | null>(null);
+  const filterSidebarRef = useRef<HTMLElement | null>(null);
   const [priceFloor, setPriceFloor] = useState(0);
   const [priceCeiling, setPriceCeiling] = useState(200000);
   const categories = ["All", ...new Set(catalogProducts.map(product => product.category))];
@@ -52,18 +67,68 @@ export function ProductsPage() {
   const clearFilters = () => {
     setCategory("All"); setSearch(""); setPriceFloor(0); setPriceCeiling(200000); navigate("/products");
   };
+  const closeFilters = () => {
+    setShowFilters(false);
+    window.requestAnimationFrame(() => filterTriggerRef.current?.focus());
+  };
+  useEffect(() => {
+    if (!showFilters) return;
+    const sidebar = filterSidebarRef.current;
+    if (!sidebar) return;
+    document.body.classList.add("filter-drawer-open");
+    const focusFrame = window.requestAnimationFrame(() => filterCloseRef.current?.focus());
+    const close = () => {
+      setShowFilters(false);
+      window.requestAnimationFrame(() => filterTriggerRef.current?.focus());
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(sidebar.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )).filter(element => element.getClientRects().length > 0);
+      if (!focusable.length) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const focusIsOutside = !sidebar.contains(document.activeElement);
+      if (event.shiftKey && (focusIsOutside || document.activeElement === first)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (focusIsOutside || document.activeElement === last)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const onResize = () => {
+      if (window.innerWidth <= 640) return;
+      setShowFilters(false);
+      window.requestAnimationFrame(() => sidebar.querySelector<HTMLElement>("input")?.focus());
+    };
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onResize);
+      document.body.classList.remove("filter-drawer-open");
+    };
+  }, [showFilters]);
   return <main className="catalog-page">
     <section className="catalog-page-head container-wide"><Breadcrumb items={["Home", "Products"]} /><h1>All Products</h1></section>
     <section className="catalog-layout container-wide">
-      <aside className={`filter-sidebar ${showFilters ? "filter-sidebar--open" : ""}`}>
-        <div className="filter-mobile-heading"><strong>Filters</strong><button aria-label="Close filters" onClick={() => setShowFilters(false)}><X size={20} /></button></div>
+      <aside id="product-filter-panel" ref={filterSidebarRef} className={`filter-sidebar ${showFilters ? "filter-sidebar--open" : ""}`} role={showFilters ? "dialog" : "region"} aria-labelledby="filter-drawer-title" aria-modal={showFilters ? "true" : undefined} onClick={event => { if (event.target === event.currentTarget && showFilters) closeFilters(); }}>
+        <div className="filter-mobile-heading"><strong id="filter-drawer-title">Filters</strong><button ref={filterCloseRef} type="button" aria-label="Close filters" onClick={closeFilters}><X size={20} /></button></div>
         <label className="sidebar-field"><span>Search</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products..." /></label>
         <div className="sidebar-section"><span>Category</span>{categories.map((item) => <button key={item} className={`sidebar-category ${category === item ? "active" : ""}`} onClick={() => selectCategory(item)}><i>{category === item ? "✓" : ""}</i>{item === "All" ? "All Products" : item === "Bags" ? "Bags & Totes" : item}</button>)}</div>
         <div className="sidebar-section"><span>Price Range</span><div className="sidebar-price"><input aria-label="Minimum price" type="number" min="0" value={priceFloor || ""} placeholder="Min" onChange={(event) => setPriceFloor(Math.min(Number(event.target.value) || 0, priceCeiling))} /><b>—</b><input aria-label="Maximum price" type="number" min="0" value={priceCeiling === 200000 ? "" : priceCeiling} placeholder="Max" onChange={(event) => setPriceCeiling(Math.max(Number(event.target.value) || 200000, priceFloor))} /></div></div>
-        <button className="apply-filter-button" onClick={() => setShowFilters(false)}>Apply Filters</button>
+        <button className="apply-filter-button" onClick={closeFilters}>Apply Filters</button>
         <button className="sidebar-clear" onClick={clearFilters}>Clear Filters</button>
       </aside>
-      <div className="catalog-results"><div className="catalog-results-heading"><span>Showing <b>{visible.length}</b> products</span><button className="catalog-filter-trigger" onClick={() => setShowFilters(true)}><SlidersHorizontal size={17} /> Filters</button></div>{catalogLoading ? <p className="catalog-status">Loading published artisan products…</p> : catalogError ? <p className="portal-error">The live catalog is temporarily unavailable. Please try again shortly.</p> : <div className="product-grid">{visible.map((product) => <ProductCard key={product.id} product={product} />)}</div>}{!catalogLoading && !catalogError && visible.length === 0 && <div className="empty-state"><Search size={26} /><h3>No published pieces found</h3><p>Try a different search or browse all available products.</p><button className="button button--dark" onClick={clearFilters}>View all products</button></div>}</div>
+      <div className="catalog-results"><div className="catalog-results-heading"><span>Showing <b>{visible.length}</b> products</span><button ref={filterTriggerRef} type="button" className="catalog-filter-trigger" aria-expanded={showFilters} aria-controls="product-filter-panel" onClick={() => setShowFilters(true)}><SlidersHorizontal size={17} /> Filters</button></div>{catalogLoading ? <p className="catalog-status">Loading published artisan products…</p> : catalogError ? <p className="portal-error">The live catalog is temporarily unavailable. Please try again shortly.</p> : <div className="product-grid">{visible.map((product) => <ProductCard key={product.id} product={product} />)}</div>}{!catalogLoading && !catalogError && visible.length === 0 && <div className="empty-state"><Search size={26} /><h3>No published pieces found</h3><p>Try a different search or browse all available products.</p><button className="button button--dark" onClick={clearFilters}>View all products</button></div>}</div>
     </section>
   </main>;
 }
@@ -80,7 +145,7 @@ export function ProductDetailPage() {
   if (catalogError) return <main><PageIntro eyebrow="Catalog unavailable" title="We can’t load this piece right now." copy="Please try again shortly." /><div className="empty-state container-wide"><Link className="button button--dark" href="/products">Browse Products <ArrowRight size={17} /></Link></div></main>;
   if (!product) return <main><PageIntro eyebrow="Not found" title="This piece has moved on." copy="The product is unavailable, out of stock, or no longer published by its seller." /><div className="empty-state container-wide"><Link className="button button--dark" href="/products">Browse Products <ArrowRight size={17} /></Link></div></main>;
   const saved = wishlist.includes(product.id);
-  return <main><Breadcrumb items={["Home", "Products", product.name]} /><section className="product-detail container-wide"><div className="detail-gallery"><div className="detail-image"><img src={product.image} alt={product.name} /></div></div><div className="detail-copy"><span className="eyebrow">{product.category}</span><h1>{product.name}</h1><div className="detail-maker">by {product.maker} <span className="verified"><span>✓</span> Approved seller</span></div><strong className="spotlight-price">{money(product.price)}</strong><p className="detail-description">{product.description}</p><div className="detail-rule" /><div className="selector-block"><div className="selector-label"><span>Size / style</span></div><div className="size-options">{product.sizes.map((item) => <button key={item} className={item === size ? "selected" : ""} onClick={() => setSize(item)}>{item}</button>)}</div></div><div className="detail-actions"><div className="detail-quantity"><span className="quantity-label">QUANTITY</span><div className="quantity-control"><button onClick={() => setQuantity(value => Math.max(1, value - 1))}><Minus size={15} /></button><span>{quantity}</span><button disabled={quantity >= Math.min(product.inventoryCount ?? 20, 20)} onClick={() => setQuantity(value => Math.min(value + 1, product.inventoryCount ?? 20, 20))}><Plus size={15} /></button></div></div><button className="button button--dark button--wide" disabled={!size || !product.inventoryCount || quantity > product.inventoryCount} onClick={() => { for (let i = 0; i < quantity; i++) addToCart(product.id, size); setAdded(true); }}>{added ? "Added to Cart" : "Add to Cart"}<ShoppingBag size={17} /></button><button className={`wishlist-detail ${saved ? "saved" : ""}`} onClick={() => toggleWishlist(product.id)} aria-label="Wishlist"><Heart size={20} fill={saved ? "currentColor" : "none"} /></button></div><div className="stock-note"><Check size={16} /> {product.inventoryCount} available · seller-fulfilled delivery</div><div className="shipping-note"><Truck size={17} /><span>Shipping is calculated by the server at checkout.<br /><small>{product.experience ?? "Made by an approved Nigerian seller"}</small></span></div><div className="maker-card"><div className="maker-avatar">{product.maker.slice(0, 2).toUpperCase()}</div><div><strong>{product.maker}</strong><span>{product.experience ?? "NaijaKoblas seller"}</span><p>Sold by an approved NaijaKoblas marketplace seller.</p></div><ArrowRight size={18} /></div></div></section><section className="section section--tint detail-story"><div className="container-wide"><SectionHeading eyebrow="The Details" title="Crafted to go the distance." /><div className="detail-values"><div><ShieldCheck size={24} /><h3>Authentic materials</h3><p>Product details are supplied by the seller.</p></div><div><Sparkles size={24} /><h3>Made by people</h3><p>Every listing is tied to its approved maker.</p></div><div><Truck size={24} /><h3>Ready to travel</h3><p>Fulfilment starts after verified payment.</p></div></div></div></section></main>;
+  return <main><Breadcrumb items={["Home", "Products", product.name]} /><section className="product-detail container-wide"><ProductGallery product={product} /><div className="detail-copy"><span className="eyebrow">{product.category}</span><h1>{product.name}</h1><div className="detail-maker">by {product.maker} <span className="verified"><span>✓</span> Approved seller</span></div><strong className="spotlight-price">{money(product.price)}</strong><p className="detail-description">{product.description}</p><div className="detail-rule" /><div className="selector-block"><div className="selector-label"><span>Size / style</span></div><div className="size-options">{product.sizes.map((item) => <button key={item} className={item === size ? "selected" : ""} onClick={() => setSize(item)}>{item}</button>)}</div></div><div className="detail-actions"><div className="detail-quantity"><span className="quantity-label">QUANTITY</span><div className="quantity-control"><button onClick={() => setQuantity(value => Math.max(1, value - 1))}><Minus size={15} /></button><span>{quantity}</span><button disabled={quantity >= Math.min(product.inventoryCount ?? 20, 20)} onClick={() => setQuantity(value => Math.min(value + 1, product.inventoryCount ?? 20, 20))}><Plus size={15} /></button></div></div><button className="button button--dark button--wide" disabled={!size || !product.inventoryCount || quantity > product.inventoryCount} onClick={() => { for (let i = 0; i < quantity; i++) addToCart(product.id, size); setAdded(true); }}>{added ? "Added to Cart" : "Add to Cart"}<ShoppingBag size={17} /></button><button className={`wishlist-detail ${saved ? "saved" : ""}`} onClick={() => toggleWishlist(product.id)} aria-label="Wishlist"><Heart size={20} fill={saved ? "currentColor" : "none"} /></button></div><div className="stock-note"><Check size={16} /> {product.inventoryCount} available · seller-fulfilled delivery</div><div className="shipping-note"><Truck size={17} /><span>Shipping is calculated by the server at checkout.<br /><small>{product.experience ?? "Made by an approved Nigerian seller"}</small></span></div><div className="maker-card"><div className="maker-avatar">{product.maker.slice(0, 2).toUpperCase()}</div><div><strong>{product.maker}</strong><span>{product.experience ?? "NaijaKoblas seller"}</span><p>Sold by an approved NaijaKoblas marketplace seller.</p></div><ArrowRight size={18} /></div></div></section><section className="section section--tint detail-story"><div className="container-wide"><SectionHeading eyebrow="The Details" title="Crafted to go the distance." /><div className="detail-values"><div><ShieldCheck size={24} /><h3>Authentic materials</h3><p>Product details are supplied by the seller.</p></div><div><Sparkles size={24} /><h3>Made by people</h3><p>Every listing is tied to its approved maker.</p></div><div><Truck size={24} /><h3>Ready to travel</h3><p>Fulfilment starts after verified payment.</p></div></div></div></section></main>;
 }
 
 export function CartPage() {
