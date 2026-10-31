@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { ArrowRight, BadgeCheck, Clock3, PackageCheck, ShieldCheck, Store, UserRound, UsersRound } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { money } from "@/store";
+import { useAuthRuntime } from "@/_core/auth-runtime";
 
 const roleLabels = {
   customer: "Customer",
@@ -29,9 +30,13 @@ function AccessDenied({ title, copy, actionHref = "/login", actionLabel = "Sign 
   return <main><section className="portal-shell container-wide"><div className="portal-card portal-empty"><span className="eyebrow">Protected area</span><h1>{title}</h1><p>{copy}</p><Link href={actionHref} className="button button--dark">{actionLabel} <ArrowRight size={17} /></Link></div></section></main>;
 }
 
+function ClerkSignOutButton() {
+  const { signOut } = useAuthRuntime();
+  return <button className="text-button" disabled={!signOut} onClick={() => { if (signOut) void signOut(); }}>Sign out</button>;
+}
+
 export function AccountPage() {
   const account = trpc.account.me.useQuery();
-  const logout = trpc.auth.logout.useMutation({ onSuccess: () => { window.location.href = "/"; } });
   const orders = trpc.orders.mine.useQuery(undefined, { enabled: Boolean(account.data), retry: false });
 
   if (account.isLoading) return <LoadingPanel />;
@@ -43,7 +48,7 @@ export function AccountPage() {
 
   return <main><section className="portal-shell container-wide"><div className="portal-header"><div><span className="eyebrow">Your NaijaKoblas space</span><h1>Welcome{user.name ? `, ${user.name}` : " back"}.</h1><p>Manage your customer account and marketplace access from one secure sign-in.</p></div><span className={`role-badge role-badge--${user.role}`}>{roleLabels[user.role]}</span></div>
     <div className="portal-grid">
-      <article className="portal-card account-summary"><UserRound size={22} /><span>Signed in as</span><strong>{user.email ?? user.name ?? "NaijaKoblas customer"}</strong><small>Authenticated through secure account sign-in.</small><button className="text-button" disabled={logout.isPending} onClick={() => logout.mutate()}>Sign out</button></article>
+      <article className="portal-card account-summary"><UserRound size={22} /><span>Signed in as</span><strong>{user.email ?? user.name ?? "NaijaKoblas customer"}</strong><small>Authenticated through Clerk.</small><ClerkSignOutButton /></article>
       <article className="portal-card"><BadgeCheck size={22} /><span>Seller status</span>{applicationStatus ? <><strong className={`status-label status-label--${applicationStatus}`}>{applicationStatus}</strong><p>{applicationStatus === "pending" ? "Your application is with the partnerships team." : applicationStatus === "approved" ? "Your seller access is active." : applicationStatus === "rejected" ? "Your application needs a further conversation with our team." : "Your seller access is currently paused."}</p></> : <><strong>Not applied</strong><p>Share your craft and apply to sell with NaijaKoblas.</p><Link href="/vendor#apply" className="text-link">Start a seller application <ArrowRight size={15} /></Link></>}</article>
       <article className="portal-card"><Store size={22} /><span>Marketplace</span><strong>Shopping access is ready</strong><p>{profile ? `Default delivery address: ${profile.city}.` : "Add your delivery details at checkout; they will be saved to this account."}</p><Link href="/products" className="text-link">Shop the live collection <ArrowRight size={15} /></Link></article>
     </div>

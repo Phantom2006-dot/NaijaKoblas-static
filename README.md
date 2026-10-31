@@ -1,6 +1,6 @@
 # NaijaKoblas
 
-NaijaKoblas is a Nigerian leather-goods marketplace with a React storefront, Express/tRPC API, customer and seller accounts, seller-owned listings, inventory, per-line fulfillment, Neon Postgres persistence and Paystack-hosted checkout. This is a test deployment; vendor payouts and production commerce are not enabled.
+NaijaKoblas is a Nigerian leather-goods marketplace with a React storefront, Express/tRPC API, Clerk email/password authentication, customer and seller accounts, seller-owned listings, inventory, per-line fulfillment, Neon Postgres persistence and Paystack-hosted checkout. This remains a test deployment; vendor payouts and production commerce are not enabled.
 
 ## Live test deployment
 
@@ -9,39 +9,41 @@ NaijaKoblas is a Nigerian leather-goods marketplace with a React storefront, Exp
 - **Health:** `https://naijakoblas-static.vercel.app/api/health`
 - **Paystack webhook path for later test setup:** `https://naijakoblas-static.vercel.app/api/payments/paystack/webhook`
 
-The Vercel Hobby project serves a static Vite build and protects preview deployments; its production alias is public. Its `/api/*` rewrite proxies to Fly before the SPA fallback so browser API calls and OAuth cookies use one origin. The Vercel production deployment is READY. The Fly API’s `/api/health` and Neon-backed `/api/trpc/catalog.list` both return HTTP 200; the catalog is currently empty, so no seller products are shown yet.
+Vercel serves the static Vite storefront; its `/api/*` rewrite proxies to Fly before the SPA fallback, keeping the browser-facing frontend and API on one origin. The Vercel production alias is public and preview deployments are protected. The API exposes `/api/health`; the Neon-backed public catalog currently contains no products.
 
-Fly runs one `shared-cpu-1x` 512 MB machine in Amsterdam on port 3000, with auto-start on requests and stop-on-idle. A shared IPv4 is assigned; no paid dedicated IPv4 was allocated. Fly meters compute while the Machine runs. Auto-stop reduces idle compute use, but stopped root-filesystem storage and any other provisioned resources may still incur charges. See [Fly pricing](https://fly.io/pricing/) and the [Fly public-networking guide](https://docs.fly.io/networking/services/).
+Fly runs one `shared-cpu-1x` 512 MB machine in Amsterdam on port 3000, with auto-start on requests and stop-on-idle. A free shared IPv4 is assigned; no paid dedicated IPv4 was allocated. Fly meters compute while the machine runs. Auto-stop reduces idle compute use, but stopped root-filesystem storage and other provisioned resources may still incur charges. See [Fly pricing](https://fly.io/pricing/) and the [Fly public-networking guide](https://docs.fly.io/networking/services/).
 
-The protected Fly runtime currently has `DATABASE_URL`, `APP_BASE_URL` and a server-generated `MANUS_JWT_SECRET`. The Neon pooled URL is connected to the empty test project in London, where the approved baseline schema was applied. No MySQL data was copied. The unused earlier app `naijakoblas-api-test` still has a staged database secret; it has not been deleted.
+The Neon pooled `DATABASE_URL` is connected to the empty London Free-plan test project, where the approved Postgres baseline was applied. `APP_BASE_URL` is set to the production Vercel origin. No MySQL data was copied. The older unused Fly app `naijakoblas-api-test` still has a staged database secret; it has not been deleted. A prior `MANUS_JWT_SECRET` is unused by the Clerk implementation and should be removed from Fly after the replacement deployment is verified.
 
-**Sign-in is not ready yet.** The Manus OAuth implementation is present, but these Fly runtime values are not configured: `MANUS_PROJECT_ID`, `MANUS_OAUTH_API_URL` and `MANUS_OAUTH_PORTAL_URL`. The OAuth callback to register is `https://naijakoblas-static.vercel.app/api/oauth/callback`. `OWNER_OPEN_ID` must be set only after the owner’s exact OAuth identity is known. Paystack is also not configured: add a test-mode `PAYSTACK_SECRET_KEY` only after the merchant test account is confirmed. Do not enable live charges or vendor payouts yet.
+## Clerk email/password sign-in
 
-## Local commands
+The application code now uses Clerk only for user authentication. Clerk’s hosted React components provide email/password sign-up, sign-in, email verification and password recovery. NaijaKoblas does **not** store passwords or password hashes. Every authenticated API request checks the current Clerk profile and requires a verified primary email before account access, profile synchronization or first-admin bootstrap. The server keeps customer/seller/staff/admin roles in Neon and ignores identity-provider role claims.
+
+Clerk is not configured yet, so login cannot be tested until keys and the Clerk instance are set up:
+
+1. Create or select a **test/development** Clerk application. Enable email address + password sign-up, require email verification, and leave social login off if password-only login is desired.
+2. Add `VITE_CLERK_PUBLISHABLE_KEY` to the Vercel project’s **Production** environment and redeploy. This `pk_test_…` value is public and belongs in the frontend build, not in a private browser form.
+3. Add the same publishable key as `CLERK_PUBLISHABLE_KEY` and its matching test `CLERK_SECRET_KEY` to Fly’s protected Secrets for `naijakoblas-static`. Do not paste keys into Git, `.env.example`, source files or chat.
+4. Add `https://naijakoblas-static.vercel.app` as an allowed Clerk origin/party. `APP_BASE_URL` already points to this exact origin. The API fails startup if only one server key is set, if the public origin is missing when Clerk is enabled, or if a production origin is not HTTPS.
+5. After the owner signs up, configure `OWNER_CLERK_USER_ID` with that exact Clerk user ID in Fly Secrets. The one-time first-admin bootstrap promotes only that configured customer account, only if no administrator exists, and records an audit event. Do not guess or publish this ID.
+
+The browser checks an uncached, public `/api/auth/status` endpoint before mounting Clerk. Sign-in stays disabled unless the Vercel key exactly matches the Fly publishable key and the API confirms a complete Clerk configuration; the endpoint never returns the secret key. When both server keys are absent, public storefront routes and health checks remain available but account access is disabled. Clerk widgets never render outside a matching provider.
+
+## Local development and database
 
 - `pnpm install` installs the lockfile dependencies.
 - `pnpm dev` starts the Express/Vite application (default port 3000).
 - `pnpm build` builds the storefront and server bundle; `pnpm start` runs the production server.
-- `pnpm check` and `pnpm test` run TypeScript validation and unit tests.
+- `pnpm check` and `pnpm test` run TypeScript validation and automated tests.
 - `pnpm db:generate` creates a PostgreSQL migration from `drizzle/schema.ts`.
 - `pnpm db:migrate` applies migrations from `drizzle/postgres/`.
 
-## Neon configuration
-
-Copy `.env.example` to `.env` for local work. Set `DATABASE_URL` to Neon’s pooled PostgreSQL URL for application traffic. Set `DATABASE_URL_UNPOOLED` to the direct Neon URL for schema migrations. Both values are secrets and must stay server-side. The checked-in `drizzle/0000_initial_users.sql` and `drizzle/0001_tense_shape.sql` are legacy MySQL history and must not be applied to Neon; the PostgreSQL baseline is isolated in `drizzle/postgres/`.
-
-The approved baseline is applied to the empty Neon Free-plan test project in London. No production database was changed; if existing account or seller data must be preserved, export, transform and validate it separately before switching production traffic.
-
-## First administrator
-
-Do not set `OWNER_OPEN_ID` until the project owner has completed OAuth and the exact server-side OAuth identity is known. Once configured as a protected server secret, the first matching customer login can become the initial administrator only if no administrator or bootstrap record exists. That one-time promotion and its audit event are transactional. No public operation accepts an owner identity or grants administrator status.
+Copy `.env.example` to `.env` for local work. Set `DATABASE_URL` to Neon’s pooled PostgreSQL URL for runtime queries and `DATABASE_URL_UNPOOLED` to the direct Neon URL for migrations. Keep both server-side. The checked-in `drizzle/0000_initial_users.sql` and `drizzle/0001_tense_shape.sql` are legacy MySQL history and must not be applied to Neon; the PostgreSQL baseline is isolated in `drizzle/postgres/`.
 
 ## Paystack checkout and seller money flow
 
-The server creates customer profiles, pending orders, immutable item snapshots and Paystack payment records. Prices, inventory reservations and delivery totals are resolved from active published listings on the server in integer kobo. Customer checkout retries are bound to a stable idempotency key and canonical payload. Paystack receives the stored unique transaction reference, server total and customer email. The browser is redirected to Paystack-hosted Checkout; this site never collects card number, expiry or CVV.
+Paystack remains unconfigured; do not accept test or live charges until a test `PAYSTACK_SECRET_KEY` and webhook endpoint are added. The server creates pending orders from live database listings, calculates totals in integer kobo, reserves stock and binds retry keys to canonical checkout payloads. The browser is redirected to Paystack-hosted checkout; NaijaKoblas never collects card number, expiry or CVV. Signed webhooks and server-side transaction verification require stored reference, amount and NGN currency to match before an order becomes paid.
 
-After the test Paystack key is added, use the webhook URL above. The route verifies `x-paystack-signature` over the exact raw request body. The customer return route separately calls Paystack’s transaction-verification API. Payment and order state become paid only when the transaction reference, amount, currency, provider status and stored order match. A protected admin queue can manually re-check pending references with Paystack; that action records the admin actor. Verified failed/abandoned/reversed transactions release stock only while the order is still awaiting payment; an ambiguous provider timeout does not.
+A protected admin queue can manually verify pending payments; scheduled reconciliation for abandoned or ambiguous transactions remains future work. Paystack documents Nigerian card, transfer and USSD channels subject to merchant enablement. Seller subaccounts and multi-split transactions are not implemented: payments currently settle to the marketplace account. Define commission, fees, bank verification, refunds/chargebacks and reconciliation policy before routing funds to vendors. See [backend research and official sources](backend-research.md).
 
-Paystack documents cards, Nigerian bank-transfer and USSD channels, subject to merchant-account and dashboard availability. Confirm the exact methods on the test account before launch. Paystack also documents subaccounts and multi-split transfers across vendors. **This code does not yet create subaccounts or split transactions**: funds currently settle to the marketplace Paystack account. Do not promise vendor payout timing or activate automatic splits until sellers’ bank details are verified and the platform commission, transaction-fee bearer, refund/chargeback and reconciliation policy is agreed. See [backend research and official sources](backend-research.md).
-
-The buyer storefront reads published server listings and uses hosted checkout; the customer account shows order history and resumable pending checkout links; the seller workspace supports draft/published listings, inventory edits and per-item processing/shipping/delivery updates. Suspended sellers lose catalog controls but retain a restricted path to complete already-paid fulfillment lines. Scheduled reconciliation for abandoned or ambiguous payments, refunds/returns, notification delivery, image storage, shipping-carrier integration, seller commission accounting and payouts remain future work.
+The buyer storefront uses the server catalog and hosted checkout; customer accounts show order history and resumable pending payment links. Seller tools cover listings, stock and per-item fulfillment. Suspended sellers retain a limited path to complete already-paid order lines. Refund/return workflows, notification delivery, image storage, shipping-carrier integration, seller commission accounting and automated payouts remain future work.

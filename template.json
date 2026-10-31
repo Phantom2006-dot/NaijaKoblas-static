@@ -16,7 +16,7 @@
     "client/src/App.tsx",
     "client/src/lib/trpc.ts",
     "client/src/pages/Home.tsx",
-    "server/auth.logout.test.ts"
+    "server/_core/context.test.ts"
   ],
   "source": {
     "repository": "manus-ai/manus-sandbox",

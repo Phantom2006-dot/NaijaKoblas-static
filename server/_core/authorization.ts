@@ -24,14 +24,14 @@ const sellerApplicationTransitions: Record<SellerApplicationStatus, readonly Sel
 };
 
 export function canBootstrapInitialAdmin(input: {
-  configuredOwnerOpenId: string;
-  authenticatedOpenId: string;
+  configuredOwnerClerkUserId: string;
+  authenticatedClerkUserId: string;
   bootstrapExists: boolean;
   administratorExists: boolean;
   ownerRole: AccountRole | null;
 }) {
-  return Boolean(input.configuredOwnerOpenId)
-    && input.configuredOwnerOpenId === input.authenticatedOpenId
+  return Boolean(input.configuredOwnerClerkUserId)
+    && input.configuredOwnerClerkUserId === input.authenticatedClerkUserId
     && !input.bootstrapExists
     && !input.administratorExists
     && input.ownerRole === "customer";

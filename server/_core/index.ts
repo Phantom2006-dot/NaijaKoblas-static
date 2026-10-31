@@ -2,18 +2,22 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
-import { publicPlatformScript } from "./publicConfig";
+import { clerkMiddleware } from "@clerk/express";
 import { registerPaymentRoutes } from "../payments/routes";
+import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { ENV } from "./env";
+import { getClerkMiddlewareOptions, getClerkServerConfig, getPublicClerkStatus } from "./clerkConfig";
 
 async function startServer() {
+  const clerkConfig = getClerkServerConfig(ENV);
+  const appOrigin = clerkConfig.appOrigin;
+  const clerkOptions = getClerkMiddlewareOptions(clerkConfig);
   const app = express();
   const server = createServer(app);
-  const appOrigin = ENV.appBaseUrl ? new URL(ENV.appBaseUrl).origin : null;
+
   app.use((req, res, next) => {
     const origin = req.get("origin");
     if (origin && appOrigin && origin !== appOrigin) {
@@ -34,6 +38,13 @@ async function startServer() {
     }
     next();
   });
+
+  if (clerkOptions) {
+    app.use(clerkMiddleware(clerkOptions));
+  } else {
+    console.warn("[Clerk] Sign-in is disabled until both server Clerk keys are configured.");
+  }
+
   app.use(express.json({
     limit: "1mb",
     verify(req, _res, buffer) {
@@ -44,12 +55,13 @@ async function startServer() {
   }));
   app.use(express.urlencoded({ limit: "16kb", extended: true }));
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+  app.get("/api/auth/status", (_req, res) => {
+    res.set("Cache-Control", "no-store").json(getPublicClerkStatus(clerkConfig));
+  });
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());
   });
   registerPaymentRoutes(app);
-  registerOAuthRoutes(app);
-  // tRPC API
   app.use(
     "/api/trpc",
     createExpressMiddleware({
@@ -57,7 +69,6 @@ async function startServer() {
       createContext,
     })
   );
-  // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
   } else {

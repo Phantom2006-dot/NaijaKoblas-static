@@ -9,7 +9,7 @@ function user(role: User["role"]): User {
     openId: "test-account",
     name: "Test Account",
     email: "test@example.com",
-    loginMethod: "manus",
+    loginMethod: "clerk",
     role,
     createdAt: now,
     updatedAt: now,
@@ -61,15 +61,15 @@ describe("account authorization", () => {
 
   it("bootstraps only the configured first owner identity, once and before another admin exists", () => {
     const valid = {
-      configuredOwnerOpenId: "owner-open-id",
-      authenticatedOpenId: "owner-open-id",
+      configuredOwnerClerkUserId: "user_owner",
+      authenticatedClerkUserId: "user_owner",
       bootstrapExists: false,
       administratorExists: false,
       ownerRole: "customer" as const,
     };
     expect(canBootstrapInitialAdmin(valid)).toBe(true);
-    expect(canBootstrapInitialAdmin({ ...valid, configuredOwnerOpenId: "" })).toBe(false);
-    expect(canBootstrapInitialAdmin({ ...valid, authenticatedOpenId: "different-user" })).toBe(false);
+    expect(canBootstrapInitialAdmin({ ...valid, configuredOwnerClerkUserId: "" })).toBe(false);
+    expect(canBootstrapInitialAdmin({ ...valid, authenticatedClerkUserId: "user_other" })).toBe(false);
     expect(canBootstrapInitialAdmin({ ...valid, bootstrapExists: true })).toBe(false);
     expect(canBootstrapInitialAdmin({ ...valid, administratorExists: true })).toBe(false);
     expect(canBootstrapInitialAdmin({ ...valid, ownerRole: "seller" })).toBe(false);

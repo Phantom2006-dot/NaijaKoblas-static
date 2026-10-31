@@ -34,7 +34,7 @@ function hasPostgresConstraint(error: unknown, constraint: string, seen = new Se
 let _pool: Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
-type OAuthUserInput = Pick<InsertUser, "openId" | "name" | "email" | "loginMethod" | "lastSignedIn">;
+type ClerkUserInput = Pick<InsertUser, "name" | "email" | "lastSignedIn"> & { clerkUserId: string };
 
 export class CommerceValidationError extends Error {
   constructor(message: string) {
@@ -104,27 +104,27 @@ function isIdempotencyUniqueViolation(error: unknown): boolean {
   return false;
 }
 
-/**
- * Synchronizes OAuth identity fields only. A configured owner is bootstrapped
- * as the first administrator exactly once; ordinary OAuth input cannot set roles.
- */
-export async function upsertUser(user: OAuthUserInput): Promise<void> {
-  if (!user.openId) throw new Error("User openId is required for upsert");
+/** Synchronizes Clerk identity fields only; client identity data cannot set application roles. */
+export async function upsertClerkUser(user: ClerkUserInput): Promise<void> {
+  if (!user.clerkUserId) throw new Error("Clerk user ID is required for upsert");
   const database = await requireDb();
   const lastSignedIn = user.lastSignedIn ?? new Date();
-  const values: InsertUser = { openId: user.openId, lastSignedIn };
-  const updateSet: Partial<InsertUser> = { lastSignedIn, updatedAt: new Date() };
+  const values: InsertUser = { openId: user.clerkUserId, loginMethod: "clerk", lastSignedIn };
+  const updateSet: Partial<InsertUser> = { loginMethod: "clerk", lastSignedIn, updatedAt: new Date() };
   if (user.name !== undefined) { values.name = user.name ?? null; updateSet.name = user.name ?? null; }
   if (user.email !== undefined) { values.email = user.email ?? null; updateSet.email = user.email ?? null; }
-  if (user.loginMethod !== undefined) { values.loginMethod = user.loginMethod ?? null; updateSet.loginMethod = user.loginMethod ?? null; }
 
   await database.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
-  if (ENV.ownerOpenId && user.openId === ENV.ownerOpenId) {
-    await bootstrapFirstAdministrator(user.openId);
+  await ensureInitialAdminForClerkUser(user.clerkUserId);
+}
+
+export async function ensureInitialAdminForClerkUser(clerkUserId: string) {
+  if (ENV.ownerClerkUserId && clerkUserId === ENV.ownerClerkUserId) {
+    await bootstrapFirstAdministrator(clerkUserId);
   }
 }
 
-async function bootstrapFirstAdministrator(ownerOpenId: string) {
+async function bootstrapFirstAdministrator(ownerClerkUserId: string) {
   const database = await requireDb();
   await database.transaction(async tx => {
     // Serialize concurrent first logins. This lock is internal and not user-selectable.
@@ -133,10 +133,10 @@ async function bootstrapFirstAdministrator(ownerOpenId: string) {
       .where(eq(adminBootstrap.key, "initial-admin")).limit(1);
     const admins = await tx.select({ id: users.id }).from(users).where(eq(users.role, "admin")).limit(1);
     const owner = await tx.select({ id: users.id, role: users.role }).from(users)
-      .where(eq(users.openId, ownerOpenId)).limit(1);
+      .where(eq(users.openId, ownerClerkUserId)).limit(1);
     if (!canBootstrapInitialAdmin({
-      configuredOwnerOpenId: ENV.ownerOpenId,
-      authenticatedOpenId: ownerOpenId,
+      configuredOwnerClerkUserId: ENV.ownerClerkUserId,
+      authenticatedClerkUserId: ownerClerkUserId,
       bootstrapExists: bootstraps.length > 0,
       administratorExists: admins.length > 0,
       ownerRole: owner[0]?.role ?? null,
@@ -152,15 +152,15 @@ async function bootstrapFirstAdministrator(ownerOpenId: string) {
       actorUserId: ownerAccount.id,
       targetUserId: ownerAccount.id,
       eventType: "initial_admin_bootstrapped",
-      metadata: { method: "configured_owner_oauth_identity" },
+      metadata: { method: "configured_owner_clerk_identity" },
     });
   });
 }
 
-export async function getUserByOpenId(openId: string) {
+export async function getUserByClerkId(clerkUserId: string) {
   const database = await getDb();
   if (!database) return undefined;
-  const result = await database.select().from(users).where(eq(users.openId, openId)).limit(1);
+  const result = await database.select().from(users).where(eq(users.openId, clerkUserId)).limit(1);
   return result[0];
 }
 

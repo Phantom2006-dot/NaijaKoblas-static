@@ -34,7 +34,7 @@ export const paymentProviderEnum = pgEnum("payment_provider", ["paystack"]);
 const createdAt = () => timestamp("createdAt", { withTimezone: true, mode: "date" }).defaultNow().notNull();
 const updatedAt = () => timestamp("updatedAt", { withTimezone: true, mode: "date" }).defaultNow().notNull();
 
-/** One OAuth identity per person. Privileged roles are assigned only by trusted server operations. */
+/** One Clerk identity per person. Privileged roles are assigned only by trusted server operations. */
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   openId: varchar("openId", { length: 255 }).notNull().unique(),

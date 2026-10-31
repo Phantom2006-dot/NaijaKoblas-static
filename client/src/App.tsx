@@ -6,8 +6,9 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { StoreProvider } from "./store";
 import { StoreShell } from "./components/store/StoreShell";
-import { AboutPage, AuthPage, CartPage, CheckoutPage, ContactPage, HomePage, InfoPage, OrderConfirmationPage, ProductDetailPage, ProductsPage, VendorPage, WaitlistPage } from "./pages/StorePages";
+import { AboutPage, CartPage, CheckoutPage, ContactPage, HomePage, InfoPage, OrderConfirmationPage, ProductDetailPage, ProductsPage, VendorPage, WaitlistPage } from "./pages/StorePages";
 import { AccountPage, AdminDashboardPage, SellerDashboardPage, StaffDashboardPage, SuspendedSellerFulfillmentPage } from "./pages/AccountPages";
+import { AuthPage } from "./pages/AuthPage";
 
 function Router() {
   return <StoreShell><Switch>
