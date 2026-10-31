@@ -2,21 +2,19 @@
 
 NaijaKoblas is a Nigerian leather-goods multi-vendor marketplace. The stack is React/Vite, Express/tRPC, Neon PostgreSQL, Clerk email/password identity and Paystack-hosted checkout. Live payments, vendor splits and payouts remain disabled.
 
-## Existing test deployment
+## Test deployment status
 
 - **Storefront:** [https://naijakoblas-static.vercel.app](https://naijakoblas-static.vercel.app)
 - **Sign up:** [https://naijakoblas-static.vercel.app/signup](https://naijakoblas-static.vercel.app/signup)
 - **Sign in:** [https://naijakoblas-static.vercel.app/login](https://naijakoblas-static.vercel.app/login)
-- **Headless administrator entry (new workflow, not deployed yet):** [https://naijakoblas-static.vercel.app/admin](https://naijakoblas-static.vercel.app/admin)
+- **Headless administrator entry:** [https://naijakoblas-static.vercel.app/admin](https://naijakoblas-static.vercel.app/admin)
 - **API host:** [https://naijakoblas-static.fly.dev](https://naijakoblas-static.fly.dev)
 - **Health:** `https://naijakoblas-static.vercel.app/api/health`
 - **Paystack webhook path for future test setup:** `https://naijakoblas-static.vercel.app/api/payments/paystack/webhook`
 
-Vercel serves the static Vite storefront and proxies `/api/*` to Fly before the SPA fallback. The production alias is public and preview deployments are protected. The previously deployed Clerk version has a matching server/browser publishable key; its sign-in/sign-up forms render. No registration, email verification or authenticated account flow was submitted during smoke testing.
+Vercel production is READY on commit `194c033` and contains the new `/admin`, role workspace, gallery and notification UI. Fly is still serving its prior release v7; release v8 was safely aborted when the migration command encountered the already-existing `account_role` enum in the Neon baseline. The new API image was not activated, so the frontend/API versions are temporarily mismatched; role-sensitive API data remains server-protected.
 
-The existing Fly app `naijakoblas-static` is in Amsterdam on one `shared-cpu-1x` 512 MB machine, port 3000, configured to autostart and stop when idle. Its machine was stopped after tests to reduce metered compute use; stopped storage and other provisioned resources may still incur charges. No duplicate machine or dedicated IPv4 is required. `DATABASE_URL`, `APP_BASE_URL`, and the Clerk key pair are stored as protected Fly secrets; values are not committed or printed. The obsolete `MANUS_JWT_SECRET` was removed. `OWNER_CLERK_USER_ID` is not set yet.
-
-The empty London Free-plan Neon test project has the approved PostgreSQL baseline. The current worktree adds gallery and notification migrations `0001`/`0002` plus a Fly pre-release migration command; they have been exercised twice against an ephemeral local PostgreSQL instance, not applied to Neon. The live API/database contains no approved test seller or listing.
+The selected Fly app `naijakoblas-static` uses one `shared-cpu-1x` 512 MB machine in Amsterdam, port 3000, with autostart and stop-on-idle. No duplicate persistent machine or dedicated IPv4 was created. `DATABASE_URL`, `APP_BASE_URL`, and the Clerk key pair are protected Fly secrets; values are not committed or printed. The obsolete `MANUS_JWT_SECRET` was removed. `OWNER_CLERK_USER_ID` is not set yet.
 
 ## Clerk accounts and role boundaries
 
@@ -24,23 +22,29 @@ Clerk is the only end-user identity provider. It handles password storage, verif
 
 The dedicated **NaijaKoblas** Clerk development app has email/password sign-up, required email verification by one-time code, Google sign-in disabled, a 15-character minimum password, compromised-password rejection, and email-code sign-in enabled. If you have not registered in this new app, use [Create account](https://naijakoblas-static.vercel.app/signup), verify the email, then use [Sign in](https://naijakoblas-static.vercel.app/login). Existing Manus OAuth sessions were not imported. Keep passwords and verification codes private.
 
-The new `/admin` route is a separate entry outside the storefront shell and has no public-navigation link. It uses the same Clerk identity, then checks the Neon role; only `admin` can see administrator tools. Staff and sellers cannot gain administrator access by knowing the route. The first administrator is bootstrapped once for the exact configured `OWNER_CLERK_USER_ID`, only after verified sign-in and only if no administrator exists. The owner ID and bootstrap have not yet been configured/tested.
+The `/admin` route is a separate headless entry outside the storefront shell and has no public-navigation link. It uses the same Clerk identity, then checks the Neon role; only `admin` can see administrator tools. Staff and sellers cannot gain administrator access by knowing the route. The first administrator is bootstrapped once for the exact configured `OWNER_CLERK_USER_ID`, only after verified sign-in and only if no administrator exists. The owner ID and bootstrap have not yet been configured/tested.
 
-## Seller, staff and administrator workflow (current uncommitted code)
+## Seller, staff and administrator workflow
 
-An approved seller keeps one Clerk account for shopping and store management. The signed-in navigation exposes a Seller Workspace or Staff Portal link for the corresponding database role; `/account` also links to the role workspace. The seller dashboard links back to customer account functions. Customer/staff/seller identity is not switched or impersonated; permissions remain database-authoritative.
+An approved seller keeps one Clerk account for shopping and store management. The signed-in navigation exposes a Seller Workspace or Staff Portal link for the corresponding database role; `/account` also links into the role workspace. The seller dashboard links back to customer account functions. Customer/staff/seller identity is not switched or impersonated; permissions remain database-authoritative.
 
 Sellers create their own draft listings. Staff and administrators can select an approved seller with an active store and create a draft listing on that seller’s behalf. It remains seller-owned and unpublished; the seller must review it, add/select a primary product photo, and have available stock before publishing. Staff/admin cannot publish it on the seller’s behalf.
 
 Product images use an authenticated multipart Express endpoint and durable Cloudinary storage—not the Fly filesystem. The server validates the verified Clerk account, database role, seller approval/store status, product ownership, JPEG/PNG/WebP MIME and file signatures. Each file is at most 8 MB, a batch contains at most four images/32 MB combined, and a listing can contain ten images total. Upload authorization occurs before multipart parsing and is rechecked in the database transaction. Only one upload batch per API process can be active; that slot stays held until parsing, Cloudinary/database work and any cleanup finish, even if the client disconnects. Requests are limited to 12 batches per account per 10-minute process-local window. Cloudinary cleanup on database failure is retried three times and logs a warning if compensation still fails; a durable orphan-asset reconciler is future operational work. Keyboard users receive visible focus indicators; the mobile menu traps Tab/Shift+Tab and closes with Escape/outside dismissal, and the mobile filter drawer provides a focus-contained, dismissible dialog.
 
-**Cloudinary app credentials are not currently present in the selected Fly app.** Before photo uploads can work after deployment, add these protected Fly secrets: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`. Do not paste credentials into chat, GitHub or frontend environment variables. Until configured, the upload route intentionally returns a setup response instead of saving files to temporary local disk.
+**Cloudinary app credentials are not currently present in Fly.** Before photo uploads can work after API deployment, add these protected Fly secrets: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`. Until configured, the upload route intentionally returns a setup response instead of saving files to temporary local disk.
 
 A signed-in notification bell shows recipient-scoped in-app events for seller applications/reviews, verified payment, fulfillment, staff-created drafts/photos and staff access changes. Defined seller/role notification events are persisted in the same database transactions as their business state changes; notification event keys are idempotent and long keys use a digest. The bell polls every 45 seconds and supports marking one/all read. This is an **in-app inbox only**; email, SMS, push or background-channel delivery is not implemented.
 
-## Database and deployment migrations
+## Database migrations and safe recovery
 
-Use pooled `DATABASE_URL` for application queries and direct `DATABASE_URL_UNPOOLED` for schema migrations. Migrations live in `drizzle/postgres/`; historical root `drizzle/0000_initial_users.sql` and `drizzle/0001_tense_shape.sql` are legacy MySQL files and must not be applied to Neon. Fly’s `release_command` runs the compiled Drizzle migration runner before a new API release starts; it prefers `DATABASE_URL_UNPOOLED` and otherwise falls back to `DATABASE_URL`. The selected Fly app currently has no `DATABASE_URL_UNPOOLED`; add the direct URL through protected Secrets before rollout if available.
+Use pooled `DATABASE_URL` for application queries and direct `DATABASE_URL_UNPOOLED` for schema migrations where available. Migrations live in `drizzle/postgres/`; historical root `drizzle/0000_initial_users.sql` and `drizzle/0001_tense_shape.sql` are legacy MySQL files and must not be applied to Neon. Fly’s release command runs the compiled migration runner before a new API release starts. Both `pnpm db:migrate` and `pnpm db:push` route through this same custom runner; they do not call `drizzle-kit migrate` directly.
+
+The Neon test database already contains the approved initial PostgreSQL baseline, but that baseline was applied before its Drizzle migration-ledger entry existed. Fly release v8 therefore aborted on the existing `account_role` enum; the baseline migration transaction rolled back, so gallery/notification migrations did not apply. Drizzle creates its bookkeeping schema/table before its transaction, so the failed attempt may have left only an empty `drizzle.__drizzle_migrations` table.
+
+The follow-up runner sets a transaction-local `public` search path and checks the full baseline—not just names. Inside a transaction it recreates the initial DDL in a scratch schema and compares enum labels, baseline table columns/types/defaults, constraints/FKs, indexes and owned sequences/columns to the existing public schema. It validates that ledger entries are an exact ordered prefix of the current journal, serializes runners with a PostgreSQL transaction advisory lock, and applies pending migrations exactly once in the same transaction. Before replay, it refuses when pending migration objects or existing-table data targets are already present without corresponding ledger rows. The parser allows only reviewed quoted SQL forms, recognizes semicolons only outside quoted values/identifiers/dollar strings, and rejects multiple top-level commands, SQL comments, `USING INDEX`, unsupported grammar and unknown operations until an explicit parser rule and test are added. Partial/mismatched schema and conflicting/gapped history fail closed; scratch-schema cleanup runs in `finally` within the transaction.
+
+A checked-in local-only integration command covers fresh setup with an unsafe ambient `search_path`, exact pre-applied baseline with user-data preservation, enum/schema mismatch, sequence-owner mismatch, unledgered later schema, the constraint-only migration, a data-only target against an existing table, history-gap refusal, and concurrent runners. It accepts only localhost and drops only its own randomly named temporary databases; it never reads the Fly/Neon `DATABASE_URL`. The integration suite and the regular `pnpm db:migrate` command (run twice on a disposable local database) passed; successful migration paths end with exactly three ledger rows. Neon itself was not modified by these local tests, and the follow-up fix is not deployed yet.
 
 ## Local development and checks
 
@@ -48,8 +52,10 @@ Use pooled `DATABASE_URL` for application queries and direct `DATABASE_URL_UNPOO
 - `pnpm dev` starts the Express/Vite application (default port 3000).
 - `pnpm build` builds the storefront, server bundle and migration runner; `pnpm build:static` builds the Vercel frontend.
 - `pnpm check` and `pnpm test` run TypeScript validation and the server/unit suite.
-- `pnpm db:generate` creates a PostgreSQL migration from `drizzle/schema.ts`.
-- `pnpm db:migrate` applies migrations from `drizzle/postgres/`.
+- `pnpm db:generate` creates a PostgreSQL migration from `drizzle/schema.ts`; review generated SQL before applying it.
+- `pnpm db:migrate` compiles and runs the audited custom PostgreSQL migration runner.
+- `pnpm db:push` generates reviewed Drizzle SQL, then invokes `pnpm db:migrate`; it does not bypass the custom runner.
+- `pnpm test:migrations:integration` runs the real compiled runner against a **disposable localhost PostgreSQL** maintenance URL. Set `MIGRATIONS_TEST_DATABASE_URL` to a local `/postgres` URL for an account with `CREATEDB`; remote hosts are rejected.
 
 Cloudinary credentials, the Clerk secret and Paystack secret are server-only. Optional Manus Maps/service values are unrelated to login. The static bundle must never contain a server credential.
 
@@ -59,6 +65,6 @@ Paystack is not configured. Do not accept test or live charges until a test `PAY
 
 Payments currently settle to the marketplace account. Seller subaccounts, commission splits and vendor payouts are not implemented. Define commissions, seller bank verification, refunds/chargebacks, reconciliation and settlement rules before routing funds to vendors. See [backend research](backend-research.md) and the implementation checklist in [TODO.md](TODO.md).
 
-## Validation and current blockers
+## Validation and remaining blockers
 
-The latest worktree passes TypeScript checks, 15 test files/69 tests, production and static builds, `git diff --check`, and an AMD64 production-image build (about 75 MB). All three migrations applied twice to an ephemeral local PostgreSQL instance and produced exactly three migration records plus the expected format constraint. Fly strict configuration validation passed. The compiled production server health/auth-status smoke test passed on the native host. Independent backend and frontend audits found no remaining medium/high issues; the upload-disconnect, primary-photo publication and keyboard-focus-return findings have been fixed and rechecked. **The new workflow code is not pushed or deployed:** the release migration has not been applied to Neon, Fly has no Cloudinary keys or direct migration URL, no approved test seller/listing exists, owner admin bootstrap has not been exercised, and Paystack remains unconfigured.
+Current local checks pass: `pnpm check`, 17 unit-test files/85 tests, production and static builds, `git diff --check`, strict Fly config validation and the final Linux/AMD64 image build (74,842,846 bytes). The checked-in PostgreSQL integration harness passed its complete regression matrix, including fresh/pre-applied baselines, data preservation, mismatch/stale-object/history refusal, constraint-only/data-only/sequence-owner checks, ambient search path and concurrency. The package `pnpm db:migrate` command was separately applied twice to a disposable local database and ended with exactly three migration rows. A fresh independent code audit found no high/medium migration-runner or parser issues; it did not connect to Neon, so the actual live ledger/object state remains unverified. A retry is conditional on the documented post-v8 baseline/empty-ledger state; the runner will fail closed and roll back if the live schema or history differs. Live gallery/notification migrations remain unapplied to Neon; Cloudinary keys, direct migration URL, approved test seller/listing and `OWNER_CLERK_USER_ID` are absent, and Paystack remains unconfigured.
