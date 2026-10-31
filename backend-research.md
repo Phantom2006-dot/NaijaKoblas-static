@@ -1,7 +1,7 @@
 # NaijaKoblas backend research
 
 **Author:** Manus AI
-**Research checked:** 30 October 2026
+**Research checked:** 30–31 October 2026
 
 ## Identity and account authorization
 
@@ -41,7 +41,12 @@ Paystack documents `abandoned` and `failed` as unsuccessful, and `reversed` as a
 
 ## Fly.io test hosting
 
-The selected test app `naijakoblas-static` is in Amsterdam and is configured for one `shared-cpu-1x` 512 MB machine with HTTPS, a `/api/health` check, automatic start on requests and stop-on-idle. Its first GitHub launch generated `internal_port = 8080`, while the Node process listens on `0.0.0.0:3000`; Fly reported a refused connection, so that machine was stopped. The launch also reported a public IPv6 allocation error. The repository’s manifest now sets port 3000; the corrected deploy and public IP still need verification. Fly meters running-machine time; check any current stopped-machine storage/network charges in [Fly pricing](https://fly.io/pricing/) and [resource pricing](https://docs.fly.io/about/pricing). Configuration behavior is documented in Fly’s [configuration reference](https://docs.fly.io/reference/configuration).
+The selected test app `naijakoblas-static` is in Amsterdam with one `shared-cpu-1x` 512 MB machine. The application listens on `0.0.0.0:3000`; `fly.toml` now uses that internal port, enables HTTPS, checks `/api/health`, and configures autostart plus stop-on-idle. The first GitHub launch expected port 8080, failed health checks and its machine was stopped. A free shared IPv4 was assigned using `fly ips allocate-v4 --shared` after that launch reported an IP allocation error. The public `/api/health` now returns HTTP 200, and the Neon-backed `/api/trpc/catalog.list` returns HTTP 200 with an empty catalog (the test database currently has no published products). The app’s pooled `DATABASE_URL` secret was entered in Fly’s protected settings and confirmed deployed by name/status only.
+
+
+Fly’s current pricing states Machines compute is billed by the second while running, shared IPv4 and Anycast IPv6 are included at no IP charge, and a dedicated IPv4 is $2/month [21]. The test uses the free shared address, not a dedicated IPv4. Stopped root-filesystem storage and egress/other provisioned resources may still incur their own charges; check the account’s actual usage and current price page [21]. Fly documents assigning shared IPv4, public service configuration and app networking in its public-networking guide [22] [23].
+
+The Vercel Hobby project `naijakoblas-static` is linked to `Phantom2006-dot/NaijaKoblas-static` and READY at `https://naijakoblas-static.vercel.app`. Its Vite production build uses Node 22; preview deployments remain protected while the public production alias is accessible. The committed `vercel.json` sends `/api/*` to the Fly hostname before the SPA fallback. Fly’s `APP_BASE_URL` is set to the production Vercel origin. Live checks returned HTTP 200 for the storefront, `/api/health`, anonymous `auth.me`, and the Neon-backed public catalog; the catalog is empty. The Fly machine was stopped after testing and auto-starts when API traffic arrives. The runtime public-config check confirms `MANUS_PROJECT_ID`, `MANUS_OAUTH_API_URL`, `MANUS_OAUTH_PORTAL_URL` and optional Manus API public config are still absent, so user sign-in has not been tested. `PAYSTACK_SECRET_KEY` is also absent; hosted payment and webhook callbacks remain untested.
 
 ## References
 
@@ -63,3 +68,6 @@ The selected test app `naijakoblas-static` is in Amsterdam and is configured for
 [18]: https://paystack.com/docs/payments/multi-split-payments/ "Paystack multi-split payments"
 [19]: https://paystack.com/docs/payments/split-payments/ "Paystack subaccounts and split payments"
 [20]: https://paystack.com/docs/payments/verify-payments/ "Paystack transaction status definitions"
+[21]: https://fly.io/pricing/ "Fly Machines and network pricing"
+[22]: https://docs.fly.io/networking/services/ "Fly public network services and IPs"
+[23]: https://docs.fly.io/networking/app-services/ "Fly app services and public routing"
