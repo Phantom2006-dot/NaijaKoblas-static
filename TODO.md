@@ -11,31 +11,31 @@
 - The Neon/Postgres schema covers accounts, profiles, seller applications/stores/listings, orders, item snapshots, Paystack transactions and per-line fulfillment. The approved baseline is applied to the empty London Free-plan test project; no production data or legacy MySQL rows were copied.
 - Customer checkout calculates server prices, reserves inventory transactionally and binds idempotency keys to canonical payloads. Paystack hosted checkout/webhooks/payment verification are implemented in test mode only; provider secrets are not configured.
 - The public catalog reads only published, in-stock listings from active seller stores. Customers have private order history; sellers can manage their own listings and fulfillment, including limited fulfillment-only access after suspension.
+- The Fly container compiles on the build host and runs a small AMD64 Alpine image with only the API’s production runtime dependencies. Vite/dev tooling loads only for development.
 
 ## Live test deployments
 
-- Vercel project `naijakoblas-static` is live at [https://naijakoblas-static.vercel.app](https://naijakoblas-static.vercel.app). It builds from GitHub `main`, serves the static Vite frontend and keeps preview deployments protected. The production alias is public.
-- Fly app `naijakoblas-static` runs in Amsterdam on one `shared-cpu-1x` 512 MB machine with port 3000, health checks, auto-start and stop-on-idle. A shared IPv4 is assigned; no dedicated IPv4 was allocated.
-- Fly’s Neon `DATABASE_URL` and `APP_BASE_URL=https://naijakoblas-static.vercel.app` are configured. The Vercel same-origin `/api/*` rewrite reaches Fly; API health and the Neon-backed catalog have returned HTTP 200. The test catalog is empty.
-- GitHub `main` is the source for Vercel production deployments. Hardened Clerk code is prepared for deployment, but no Clerk keys are configured and live authentication cannot be verified yet. When both API keys are absent, auth status reports unavailable without exposing credentials; a partial/mis-originated Clerk config fails startup.
-- The old Fly app `naijakoblas-api-test` still has an unused staged database secret. A generated `MANUS_JWT_SECRET` remains on the selected app but is obsolete and should be removed after the Clerk image is deployed and verified.
+- Vercel project `naijakoblas-static` is live at [https://naijakoblas-static.vercel.app](https://naijakoblas-static.vercel.app). Production is READY on GitHub commit `381db5181cba1dfc15955561e409a09b9dd4a3e3`; preview deployments remain protected.
+- Fly app `naijakoblas-static` uses image `clerk-381db51`, release v6, in Amsterdam with one `shared-cpu-1x` 512 MB machine on port 3000. It is intentionally stopped after smoke tests; Fly autostarts it for requests and stops it when idle. A shared IPv4 is assigned; no dedicated IPv4 was allocated.
+- The selected Fly app retains `DATABASE_URL` and `APP_BASE_URL=https://naijakoblas-static.vercel.app`. The obsolete `MANUS_JWT_SECRET` was removed after the Clerk image was deployed. The old app `naijakoblas-api-test` still has an unused staged database secret; it has not been deleted.
+- Before stopping the Fly machine, direct Fly and Vercel-proxied calls to `/api/health` and `/api/auth/status` returned HTTP 200. The Vercel-proxied public catalog also returned HTTP 200 with an empty result. The Neon test catalog is empty.
+- Clerk keys and the owner’s Clerk ID are not configured. The live API reports `{"configured":false,"publishableKey":null}` until the server keys are added; live sign-in cannot yet be tested. Paystack keys are also absent.
 
 ## Blockers and pre-launch work
 
-- Clerk keys and instance settings are not configured: set matching test `CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` in Fly Secrets, set the same public key as `VITE_CLERK_PUBLISHABLE_KEY` in Vercel Production, enable email/password and required email verification in Clerk, and allow the exact `https://naijakoblas-static.vercel.app` origin. Until the two deployments are configured and tested, sign-in cannot be verified end to end.
+- Clerk test-instance settings and keys are required: enable email/password and required email verification, allow the exact `https://naijakoblas-static.vercel.app` origin, set `CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` in Fly Secrets, and set the same publishable key as Vercel Production `VITE_CLERK_PUBLISHABLE_KEY`. Keep the API and browser keys paired; until configured, sign-in remains unavailable.
 - After the owner signs up, set the exact Clerk `user_…` ID as `OWNER_CLERK_USER_ID` in Fly Secrets; trigger an authenticated request and confirm the one-time administrator bootstrap. Do not guess or publish the identity.
 - Paystack is not configured. Add a test-mode secret, verify Nigerian cards/bank transfer/USSD in the merchant dashboard, configure the Vercel-proxied webhook URL, and test hosted checkout, verification, retries, webhook signatures and inventory release.
 - Remove the old app’s unused staged Neon secret only after confirming it is no longer needed; never copy a secret from Fly logs or output.
 - Seller subaccounts/multi-split, commission accounting and payouts remain unimplemented. Define fee/commission, bank verification, refunds, chargebacks, settlement and reconciliation policy first.
 - Pending inventory releases only after provider-verified failure, abandonment or reversal. Scheduled reconciliation and escalation for ambiguous transactions, refund/return workflows, support/disputes, shipping, customer notifications and image storage remain open.
-- Validation passes after the auth hardening: TypeScript, 12 test files/57 tests, production app build, static Vercel build, whitespace check and local health/auth-status smoke checks. The static bundle contains no Clerk secret, Neon connection string or Paystack key. Remote deployment and live Clerk login remain unverified.
+- Validation passes: TypeScript, 12 test files/57 tests, production app build, static Vercel build, whitespace check, AMD64 production image build, local dev smoke checks, and live Fly/Vercel health/auth/catalog smoke checks. The static bundle has no Clerk secret, Neon connection string or Paystack key. Live Clerk authentication and Paystack transactions remain unverified because provider keys are not configured.
 
 ## Next
 
-1. Push the reviewed Clerk changes to GitHub `main`, redeploy the API image to the existing Fly app and allow Vercel to rebuild from the same commit.
-2. Create/select a Clerk test application; enable email/password and require email verification. Add the test publishable key to Vercel as `VITE_CLERK_PUBLISHABLE_KEY`; add that exact key as Fly `CLERK_PUBLISHABLE_KEY` plus its matching server-only `CLERK_SECRET_KEY`. Keep `APP_BASE_URL` set to the exact HTTPS Vercel origin and allow it in Clerk.
-3. Verify registration, required email verification, login, logout, password reset, Bearer-authenticated account sync and role-protected routes through Vercel.
-4. Set `OWNER_CLERK_USER_ID` only after the owner’s exact Clerk ID is known; confirm the first-admin audit/bootstrap using the empty test database.
-5. Remove unused `MANUS_JWT_SECRET` from Fly after the Clerk deployment is confirmed; remove the old app’s staged Neon secret after confirming it is unused.
-6. Add Paystack test keys and webhook setup, then test payment and inventory transitions. Keep live payments and vendor payouts disabled.
-7. Define seller settlement policy before implementing subaccounts/multi-split; add scheduled reconciliation, refunds/returns and operational support before launch.
+1. Configure the Clerk test instance for verified email/password and the production Vercel origin; enter the matching server and browser publishable keys in Fly and Vercel protected environments.
+2. Verify sign-up, email verification, login, logout, password reset, Bearer-authenticated account sync and role-protected routes through Vercel.
+3. Set `OWNER_CLERK_USER_ID` only after the owner’s exact Clerk ID is known; confirm the first-admin audit/bootstrap using the empty test database.
+4. Add Paystack test keys and webhook setup, then test payment and inventory transitions. Keep live payments and vendor payouts disabled.
+5. Confirm and remove the old abandoned app’s staged Neon secret if it is no longer needed.
+6. Define seller settlement policy before implementing subaccounts/multi-split; add scheduled reconciliation, refunds/returns and operational support before launch.
