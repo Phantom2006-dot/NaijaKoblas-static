@@ -108,6 +108,7 @@ function ClerkAuthFlow({ signup }: { signup: boolean }) {
                 ? <SignUp routing="hash" signInUrl={signInUrl} forceRedirectUrl={returnTo} fallbackRedirectUrl={returnTo} appearance={appearance} />
                 : <SignIn routing="hash" signUpUrl={signUpUrl} forceRedirectUrl={returnTo} fallbackRedirectUrl={returnTo} appearance={appearance} />}</div>
               <p className="auth-switch">{signup ? "Already part of NaijaKoblas?" : "New to NaijaKoblas?"} <Link href={signup ? signInUrl : signUpUrl}>{signup ? "Sign in" : "Create your account"}</Link></p>
+              {!signup && <p className="auth-admin-access">Administrator? <Link href="/login?returnTo=%2Fadmin">Sign in to the admin portal</Link></p>}
             </>}
   </AuthFrame>;
 }

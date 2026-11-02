@@ -10,14 +10,6 @@ import * as db from "./db";
 import { initializePaystackCheckout, verifyPaystackTransaction } from "./payments/paystack";
 import { classifyPaystackTransaction } from "./payments/reconciliation";
 
-const sellerApplicationInput = z.object({
-  legalName: z.string().trim().min(2).max(160),
-  email: z.string().trim().email().max(320),
-  businessName: z.string().trim().min(2).max(160),
-  craftSummary: z.string().trim().min(20).max(2_000),
-  phone: z.string().trim().min(7).max(40),
-  city: z.string().trim().min(2).max(100),
-});
 const reviewInput = z.object({
   applicationId: z.number().int().positive(),
   status: z.enum(["approved", "rejected", "suspended"]),
@@ -69,7 +61,7 @@ async function assertSellerFulfillmentAccess(user: User) {
   if (user.role === "seller") return;
   const application = await db.getSellerApplicationByUserId(user.id);
   if (!canAccessSellerFulfillment(user.role, application?.status ?? null)) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Seller approval is required to access order fulfillment." });
+    throw new TRPCError({ code: "FORBIDDEN", message: "Active seller access is required to manage order fulfillment." });
   }
 }
 
@@ -101,13 +93,21 @@ export const appRouter = router({
     saveCustomerProfile: protectedProcedure.input(profileInput).mutation(({ ctx, input }) =>
       db.saveCustomerProfile(ctx.user.id, input),
     ),
-    submitSellerApplication: protectedProcedure.input(sellerApplicationInput).mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "customer") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only customer accounts can submit a seller application." });
+    becomeSeller: protectedProcedure.mutation(async ({ ctx }) => {
+      try {
+        return await db.activateSellerAccount(ctx.user.id);
+      } catch (error) {
+        if (error instanceof db.CommerceValidationError) {
+          throw new TRPCError({ code: "FORBIDDEN", message: error.message });
+        }
+        throw error;
       }
-      const existing = await db.getSellerApplicationByUserId(ctx.user.id);
-      if (existing) throw new TRPCError({ code: "CONFLICT", message: "A seller application already exists for this account." });
-      return db.createSellerApplication(ctx.user.id, input);
+    }),
+    submitSellerApplication: protectedProcedure.input(z.unknown()).mutation(() => {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "Seller application forms have been retired. Use the one-click Become a seller action; no application details are required.",
+      });
     }),
   }),
 
@@ -210,6 +210,18 @@ export const appRouter = router({
         db.listOrdersForSeller(ctx.user.id),
       ]);
       return { user: publicAccount(ctx.user), application, store, products, orders };
+    }),
+    updateStoreProfile: sellerProcedure.input(z.object({
+      displayName: z.string().trim().min(2).max(160),
+      city: z.string().trim().min(2).max(100),
+      description: z.string().trim().max(1_000).optional(),
+    })).mutation(async ({ ctx, input }) => {
+      try {
+        return await db.updateSellerStoreProfile(ctx.user.id, input);
+      } catch (error) {
+        if (error instanceof db.CommerceValidationError) throw new TRPCError({ code: "FORBIDDEN", message: error.message });
+        throw error;
+      }
     }),
     products: sellerProcedure.query(({ ctx }) => db.listSellerProducts(ctx.user.id)),
     createProduct: sellerProcedure.input(z.object(sellerProductFields)).mutation(({ ctx, input }) => {

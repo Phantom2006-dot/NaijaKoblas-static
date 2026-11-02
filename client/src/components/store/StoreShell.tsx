@@ -157,7 +157,7 @@ export function ProductCard({ product }: { product: Product }) {
 }
 
 export function TrustStrip() {
-  const items = [["Approved Sellers", "Published listings belong to approved seller accounts"], ["Hosted Checkout", "Payment details are entered only on Paystack’s hosted page"], ["Order Visibility", "Customers can view order and fulfillment status in their account"], ["Seller Workspace", "Vendors manage their listings, stock and paid order lines"]];
+  const items = [["Active Sellers", "Published listings belong to active seller accounts"], ["Hosted Checkout", "Payment details are entered only on Paystack’s hosted page"], ["Order Visibility", "Customers can view order and fulfillment status in their account"], ["Seller Workspace", "Vendors manage their listings, stock and paid order lines"]];
   return <section className="trust-strip"><div className="container-wide trust-grid">{items.map(([title, copy], index) => <div className="trust-item" key={title}><span className="trust-number">0{index + 1}</span><div><h3>{title}</h3><p>{copy}</p></div></div>)}</div></section>;
 }
 

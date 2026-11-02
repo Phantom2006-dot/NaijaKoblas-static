@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { ArrowRight, BadgeCheck, Clock3, PackageCheck, ShieldCheck, Store, UserRound, UsersRound } from "lucide-react";
+import { BecomeSellerButton } from "@/components/store/BecomeSellerButton";
 import { trpc } from "@/lib/trpc";
 import { money } from "@/store";
 import { useAuthRuntime } from "@/_core/auth-runtime";
 
 const roleLabels = {
   customer: "Customer",
-  seller: "Approved seller",
+  seller: "Seller",
   staff: "Staff",
   admin: "Administrator",
 } as const;
@@ -43,13 +44,37 @@ export function AccountPage() {
   if (!account.data) return <AccessDenied title="Sign in required" copy="Please sign in to view your NaijaKoblas account." />;
 
   const { user, sellerApplication, profile } = account.data;
-  const portal = user.role === "seller" ? ["Seller dashboard", "/seller"] : user.role === "staff" ? ["Staff portal", "/staff"] : user.role === "admin" ? ["Admin portal", "/admin"] : null;
   const applicationStatus = sellerApplication?.status;
+  const sellerModerationBlocked = applicationStatus === "rejected" || applicationStatus === "suspended";
+  const activeSellerRole = user.role === "seller" && applicationStatus === "approved" && !sellerModerationBlocked;
+  const portal = activeSellerRole ? ["Seller dashboard", "/seller"] : user.role === "staff" ? ["Staff portal", "/staff"] : user.role === "admin" ? ["Admin portal", "/admin"] : null;
+  const sellerStatus = sellerModerationBlocked
+    ? applicationStatus
+    : applicationStatus === "pending"
+      ? "pending"
+      : activeSellerRole
+        ? "active"
+        : user.role === "seller"
+          ? "needs support"
+          : applicationStatus ?? "not active";
+  const sellerStatusCopy = applicationStatus === "rejected"
+    ? "Seller access was previously declined. Contact support if you believe this is an error."
+    : applicationStatus === "suspended"
+      ? "Seller access is paused. Contact support to request reinstatement."
+      : user.role === "staff" || user.role === "admin"
+        ? "This trusted staff role cannot be changed through seller self-service."
+        : applicationStatus === "pending"
+          ? "Your existing application is pending, but you can activate your seller workspace directly now."
+          : activeSellerRole
+            ? "Your seller workspace is active. No application review is required."
+            : user.role === "seller"
+              ? "The seller account record is incomplete. Contact NaijaKoblas support before continuing."
+              : "Activate seller access directly; you can complete your store profile later.";
 
   return <main><section className="portal-shell container-wide"><div className="portal-header"><div><span className="eyebrow">Your NaijaKoblas space</span><h1>Welcome{user.name ? `, ${user.name}` : " back"}.</h1><p>Manage your customer account and marketplace access from one secure sign-in.</p></div><span className={`role-badge role-badge--${user.role}`}>{roleLabels[user.role]}</span></div>
     <div className="portal-grid">
       <article className="portal-card account-summary"><UserRound size={22} /><span>Signed in as</span><strong>{user.email ?? user.name ?? "NaijaKoblas customer"}</strong><small>Authenticated through Clerk.</small><ClerkSignOutButton /></article>
-      <article className="portal-card"><BadgeCheck size={22} /><span>Seller status</span>{applicationStatus ? <><strong className={`status-label status-label--${applicationStatus}`}>{applicationStatus}</strong><p>{applicationStatus === "pending" ? "Your application is with the partnerships team." : applicationStatus === "approved" ? "Your seller access is active." : applicationStatus === "rejected" ? "Your application needs a further conversation with our team." : "Your seller access is currently paused."}</p></> : <><strong>Not applied</strong><p>Share your craft and apply to sell with NaijaKoblas.</p><Link href="/vendor#apply" className="text-link">Start a seller application <ArrowRight size={15} /></Link></>}</article>
+      <article className="portal-card"><BadgeCheck size={22} /><span>Seller status</span><strong className={`status-label ${sellerModerationBlocked ? `status-label--${applicationStatus}` : activeSellerRole ? "status-label--approved" : applicationStatus ? `status-label--${applicationStatus}` : ""}`}>{sellerStatus}</strong><p>{sellerStatusCopy}</p><BecomeSellerButton role={user.role} applicationStatus={applicationStatus ?? null} /></article>
       <article className="portal-card"><Store size={22} /><span>Marketplace</span><strong>Shopping access is ready</strong><p>{profile ? `Default delivery address: ${profile.city}.` : "Add your delivery details at checkout; they will be saved to this account."}</p><Link href="/products" className="text-link">Shop the live collection <ArrowRight size={15} /></Link></article>
     </div>
     {portal && <div className="portal-callout"><ShieldCheck size={20} /><div><strong>{portal[0]} available</strong><span>Your current account role has access to a protected workspace.</span></div><Link href={portal[1]} className="button button--dark">{user.role === "seller" ? "Enter seller workspace" : user.role === "staff" ? "Enter staff workspace" : "Open private admin"} <ArrowRight size={16} /></Link></div>}
@@ -60,13 +85,24 @@ export function AccountPage() {
 
 export function SellerDashboardPage() {
   const seller = trpc.seller.dashboard.useQuery();
+  const [notice, setNotice] = useState<string | null>(null);
+  const [storeProfile, setStoreProfile] = useState({ displayName: "", city: "", description: "" });
+  const updateStoreProfile = trpc.seller.updateStoreProfile.useMutation({ onSuccess: () => { void seller.refetch(); setNotice("Store profile saved."); } });
   const createProduct = trpc.seller.createProduct.useMutation({ onSuccess: () => { void seller.refetch(); } });
   const updateProduct = trpc.seller.updateProduct.useMutation({ onSuccess: () => { void seller.refetch(); } });
   const updateFulfillment = trpc.seller.updateOrderItemFulfillment.useMutation({ onSuccess: () => { void seller.refetch(); } });
-  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    const store = seller.data?.store;
+    if (store) setStoreProfile({ displayName: store.displayName, city: store.city, description: store.description ?? "" });
+  }, [seller.data?.store?.id, seller.data?.store?.updatedAt]);
   if (seller.isLoading) return <LoadingPanel label="Loading your seller workspace…" />;
-  if (seller.error) return seller.error.data?.code === "FORBIDDEN" ? <AccessDenied title="Seller approval required" copy="This workspace becomes available after your seller application has been approved." actionHref="/account" actionLabel="Go to my account" /> : <AccessDenied title="Seller workspace unavailable" copy="We could not load your seller data. Please retry after the database service is available." actionHref="/account" actionLabel="Go to my account" />;
-  if (!seller.data) return <AccessDenied title="Seller approval required" copy="This workspace becomes available after your seller application has been approved." actionHref="/account" actionLabel="Go to my account" />;
+  if (seller.error) return seller.error.data?.code === "FORBIDDEN" ? <AccessDenied title="Seller access required" copy="Activate seller access from your account. Previously rejected or suspended seller accounts must contact support for reinstatement." actionHref="/account" actionLabel="Go to my account" /> : <AccessDenied title="Seller workspace unavailable" copy="We could not load your seller data. Please retry after the database service is available." actionHref="/account" actionLabel="Go to my account" />;
+  if (!seller.data) return <AccessDenied title="Seller access required" copy="Activate seller access from your account to open this workspace." actionHref="/account" actionLabel="Go to my account" />;
+
+  const submitStoreProfile = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    updateStoreProfile.mutate(storeProfile);
+  };
 
   const submitProduct = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -95,8 +131,9 @@ export function SellerDashboardPage() {
     }, { onSuccess: () => setNotice("Listing price and stock saved.") });
   };
 
-  return <main><section className="portal-shell container-wide"><div className="portal-header"><div><span className="eyebrow">Seller workspace</span><h1>{seller.data.application?.businessName ?? seller.data.store?.displayName ?? "Your craft business"}</h1><p>Manage seller-owned products, stock and order-line fulfilment. Payments currently settle to the marketplace Paystack account; vendor payouts are not enabled.</p></div><span className="role-badge role-badge--seller">Approved seller</span></div>
-    <div className="portal-grid"><article className="portal-card"><Store size={22} /><span>Store status</span><strong>{seller.data.store?.isActive ? "Active" : "Not active"}</strong><p>{seller.data.store?.isActive ? "Published products can appear in the public catalog." : "Contact partnerships to activate your store."}</p></article><article className="portal-card"><PackageCheck size={22} /><span>Products</span><strong>{seller.data.products.length}</strong><p>Draft listings stay private until published.</p></article><article className="portal-card"><UsersRound size={22} /><span>Account</span><strong>{seller.data.user.email ?? seller.data.user.name ?? "Seller"}</strong><Link href="/account" className="text-link">Switch to customer account <ArrowRight size={15} /></Link></article></div>
+  return <main><section className="portal-shell container-wide"><div className="portal-header"><div><span className="eyebrow">Seller workspace</span><h1>{seller.data.store?.displayName ?? seller.data.application?.businessName ?? "Your craft business"}</h1><p>Manage seller-owned products, stock and order-line fulfilment. Payments currently settle to the marketplace Paystack account; vendor payouts are not enabled.</p></div><span className="role-badge role-badge--seller">Active seller</span></div>
+    <div className="portal-grid"><article className="portal-card"><Store size={22} /><span>Store status</span><strong>{seller.data.store?.isActive ? "Active" : "Not active"}</strong><p>{seller.data.store?.isActive ? "Seller access is active; complete the optional store profile whenever you are ready." : "Contact NaijaKoblas support about this inactive store."}</p></article><article className="portal-card"><PackageCheck size={22} /><span>Products</span><strong>{seller.data.products.length}</strong><p>Draft listings stay private until published.</p></article><article className="portal-card"><UsersRound size={22} /><span>Account</span><strong>{seller.data.user.email ?? seller.data.user.name ?? "Seller"}</strong><Link href="/account" className="text-link">Switch to customer account <ArrowRight size={15} /></Link></article></div>
+    <section className="portal-section"><div className="section-heading"><div><span className="eyebrow">Optional setup</span><h2>Store profile</h2></div></div><form className="portal-card seller-product-form seller-profile-form" onSubmit={submitStoreProfile}><p>Your seller workspace is already active. Add or update these public store details whenever you choose.</p><div className="form-grid"><label className="form-field"><span>STORE NAME</span><input value={storeProfile.displayName} minLength={2} maxLength={160} required onChange={event => setStoreProfile(current => ({ ...current, displayName: event.target.value }))} /></label><label className="form-field"><span>CITY</span><input value={storeProfile.city} minLength={2} maxLength={100} required onChange={event => setStoreProfile(current => ({ ...current, city: event.target.value }))} /></label><label className="form-field form-field--wide"><span>DESCRIPTION (OPTIONAL)</span><textarea value={storeProfile.description} maxLength={1_000} rows={3} onChange={event => setStoreProfile(current => ({ ...current, description: event.target.value }))} /></label></div><button className="button button--outline" type="submit" disabled={updateStoreProfile.isPending}>{updateStoreProfile.isPending ? "Saving…" : "Save store profile"}<ArrowRight size={16} /></button>{updateStoreProfile.error && <p className="portal-error">{updateStoreProfile.error.message}</p>}</form></section>
     <section className="portal-section"><div className="section-heading"><div><span className="eyebrow">Seller-owned catalog</span><h2>Products and inventory</h2></div></div><form className="portal-card seller-product-form" onSubmit={submitProduct}><h3>Create a draft listing</h3><div className="form-grid"><label className="form-field"><span>PRODUCT NAME</span><input name="name" minLength={2} maxLength={180} required /></label><label className="form-field"><span>CATEGORY</span><input name="category" defaultValue="Accessories" required /></label><label className="form-field"><span>PRICE (NGN)</span><input name="priceNaira" type="number" min="1" max="21000000" step="1" required /></label><label className="form-field"><span>AVAILABLE STOCK</span><input name="inventoryCount" type="number" min="0" max="1000000" step="1" required /></label><label className="form-field form-field--wide"><span>DESCRIPTION</span><textarea name="description" minLength={20} maxLength={5000} rows={3} required /></label><label className="form-field form-field--wide"><span>SIZES / STYLES (comma-separated)</span><input name="sizes" placeholder="One Size, M, L" required /></label></div><button className="button button--dark" type="submit" disabled={createProduct.isPending}>{createProduct.isPending ? "Saving…" : "Create draft listing"}<ArrowRight size={16} /></button>{createProduct.error && <p className="portal-error">{createProduct.error.message}</p>}</form>
       {seller.data.products.length ? <div className="portal-list">{seller.data.products.map(product => <article className="portal-row seller-product-row" key={product.id}><div><span className={`status-label status-label--${product.status}`}>{product.status}</span><h3>{product.name}</h3><p>{product.category} · {money(product.priceKobo / 100)} · {product.sizes.join(", ")}</p><form className="seller-stock-form" onSubmit={event => submitStockEdit(event, product.id)}><label>Price ₦ <input aria-label={`${product.name} price`} name="priceNaira" type="number" min="1" max="21000000" defaultValue={product.priceKobo / 100} required /></label><label>Stock <input aria-label={`${product.name} stock`} name="inventoryCount" type="number" min="0" max="1000000" defaultValue={product.inventoryCount} required /></label><button className="button button--outline" type="submit" disabled={updateProduct.isPending}>Save</button></form></div><div className="portal-row-actions"><span>{product.inventoryCount} in stock</span>{product.status !== "published" && !product.images.some(image => image.isPrimary) && <small className="image-publish-hint">Add and select a primary photo below before publishing.</small>}{product.status === "published" ? <button className="button button--outline" disabled={updateProduct.isPending} onClick={() => updateProduct.mutate({ productId: product.id, changes: { status: "archived" } })}>Archive</button> : <button className="button button--dark" disabled={updateProduct.isPending || !product.inventoryCount || !seller.data.store?.isActive || !product.images.some(image => image.isPrimary)} onClick={() => updateProduct.mutate({ productId: product.id, changes: { status: "published" } })}>Publish</button>}</div></article>)}</div> : <div className="portal-card portal-empty"><PackageCheck size={24} /><h3>No listings yet</h3><p>Create your first draft above, then publish it to the public catalog.</p></div>}
     </section>
@@ -113,7 +150,7 @@ export function SuspendedSellerFulfillmentPage() {
   const orders = trpc.seller.fulfillmentOrders.useQuery();
   const update = trpc.seller.updateOrderItemFulfillment.useMutation({ onSuccess: () => { void orders.refetch(); } });
   if (orders.isLoading) return <LoadingPanel label="Loading existing paid orders…" />;
-  if (orders.error) return <AccessDenied title="Fulfilment access unavailable" copy="This restricted workspace is available only to sellers with existing approved or suspended applications. Contact support if you need help with an already-paid order." actionHref="/account" actionLabel="Return to my account" />;
+  if (orders.error) return <AccessDenied title="Fulfilment access unavailable" copy="This restricted workspace is available only for previously paid orders belonging to an active or suspended seller account. Contact support if you need help with an already-paid order." actionHref="/account" actionLabel="Return to my account" />;
 
   return <main><section className="portal-shell container-wide"><div className="portal-header"><div><span className="eyebrow">Limited seller access</span><h1>Outstanding order fulfilment</h1><p>Seller product and store controls remain paused. This page only shows paid order lines assigned to your seller account.</p></div><span className="role-badge role-badge--seller">Fulfilment only</span></div>
     {orders.data?.length ? <div className="portal-list">{orders.data.map(({ order, item }) => {
@@ -128,10 +165,10 @@ export function SuspendedSellerFulfillmentPage() {
 export function StaffDashboardPage() {
   const applications = trpc.staff.sellerApplications.useQuery();
   const review = trpc.staff.reviewSellerApplication.useMutation({ onSuccess: () => applications.refetch() });
-  if (applications.isLoading) return <LoadingPanel label="Loading seller applications…" />;
+  if (applications.isLoading) return <LoadingPanel label="Loading seller oversight records…" />;
   if (applications.error) return <AccessDenied title="Staff access required" copy="This review workspace is available only to trusted staff and administrators." actionHref="/account" actionLabel="Go to my account" />;
 
-  return <main><section className="portal-shell container-wide"><div className="portal-header"><div><span className="eyebrow">Partnerships review</span><h1>Seller applications</h1><p>Review verified seller information and make one auditable approval decision at a time. Approved sellers can also be safely suspended or re-approved.</p></div><span className="role-badge role-badge--staff">Staff portal</span></div><div className="portal-list">{applications.data?.length ? applications.data.map(({ application, applicant }) => <article className="portal-row" key={application.id}><div><span className={`status-label status-label--${application.status}`}>{application.status}</span><h2>{application.businessName}</h2><p>{application.legalName} · {application.city} · {application.craftSummary}</p><small>{applicant.email ?? application.email}</small></div><div className="portal-row-actions">{application.status === "pending" && <><button className="button button--dark" disabled={review.isPending} onClick={() => review.mutate({ applicationId: application.id, status: "approved", reviewNote: "Approved from the staff portal." })}>Approve</button><button className="button button--outline" disabled={review.isPending} onClick={() => review.mutate({ applicationId: application.id, status: "rejected", reviewNote: "Please contact partnerships for next steps." })}>Decline</button></>}{application.status === "approved" && <button className="button button--outline" disabled={review.isPending} onClick={() => review.mutate({ applicationId: application.id, status: "suspended", reviewNote: "Seller access paused by the staff portal." })}>Suspend</button>}{application.status === "suspended" && <button className="button button--dark" disabled={review.isPending} onClick={() => review.mutate({ applicationId: application.id, status: "approved", reviewNote: "Seller access restored by the staff portal." })}>Re-approve</button>}</div></article>) : <div className="portal-card portal-empty"><BadgeCheck size={24} /><h2>No seller applications</h2><p>New seller applications will appear here for review.</p></div>}</div>{review.error && <p className="portal-error">{review.error.message}</p>}</section></main>;
+  return <main><section className="portal-shell container-wide"><div className="portal-header"><div><span className="eyebrow">Seller safety and oversight</span><h1>Seller accounts</h1><p>Seller accounts activate directly. Legacy pending applications can still be resolved here, and active sellers can be suspended or reinstated for marketplace safety.</p></div><span className="role-badge role-badge--staff">Staff portal</span></div><div className="portal-list">{applications.data?.length ? applications.data.map(({ application, applicant }) => <article className="portal-row" key={application.id}><div><span className={`status-label status-label--${application.status}`}>{application.status}</span><h2>{application.businessName}</h2><p>{application.legalName} · {application.city} · {application.craftSummary}</p><small>{applicant.email ?? application.email}</small>{application.reviewNote && <small>{application.reviewNote}</small>}</div><div className="portal-row-actions">{application.status === "pending" && <><button className="button button--dark" disabled={review.isPending} onClick={() => review.mutate({ applicationId: application.id, status: "approved", reviewNote: "Approved from the staff portal." })}>Approve</button><button className="button button--outline" disabled={review.isPending} onClick={() => review.mutate({ applicationId: application.id, status: "rejected", reviewNote: "Please contact partnerships for next steps." })}>Decline</button></>}{application.status === "approved" && <button className="button button--outline" disabled={review.isPending} onClick={() => review.mutate({ applicationId: application.id, status: "suspended", reviewNote: "Seller access paused by the staff portal." })}>Suspend</button>}{application.status === "suspended" && <button className="button button--dark" disabled={review.isPending} onClick={() => review.mutate({ applicationId: application.id, status: "approved", reviewNote: "Seller access restored by the staff portal." })}>Re-approve</button>}</div></article>) : <div className="portal-card portal-empty"><BadgeCheck size={24} /><h2>No seller records yet</h2><p>Self-service sellers and legacy applications will appear here.</p></div>}</div>{review.error && <p className="portal-error">{review.error.message}</p>}</section></main>;
 }
 
 export function AdminDashboardPage() {

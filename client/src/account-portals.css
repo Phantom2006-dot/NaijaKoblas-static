@@ -42,6 +42,11 @@
 .portal-row-actions .button { min-height: 38px; padding: 10px 14px; font-size: 11px; }
 .portal-row-actions .image-publish-hint { flex: 1 1 100%; margin: 0; color: var(--ref-gold); font-size: 10px; line-height: 1.45; text-align: right; }
 .portal-error { margin: 16px 0 0; color: #d86a5d; font-size: 13px; }
+.portal-note { color: var(--ref-muted); font-size: 12px; line-height: 1.55; }
+.seller-activation-action { display: grid; justify-items: start; gap: 9px; margin-top: 12px; }
+.seller-activation-action small { color: var(--ref-muted); font-size: 11px; line-height: 1.55; }
+.seller-activation-action .portal-error { margin: 0; }
+.seller-profile-form > p { margin: 0 0 18px; color: var(--ref-muted); font-size: 13px; line-height: 1.6; }
 .vendor-auth-cta { display: grid; align-content: center; justify-items: start; gap: 12px; min-height: 250px; padding: 28px; border: 1px solid var(--ref-line); background: var(--ref-surface); color: var(--ref-text); }
 .vendor-auth-cta > svg { color: var(--ref-green-bright); }
 .vendor-auth-cta > strong { font-size: 19px; }

@@ -1881,6 +1881,8 @@ body.menu-open { overflow: hidden; }
 .clerk-auth-card .auth-switch { position: relative; z-index: 1; margin: 20px 0 0 !important; padding-top: 17px; border-top: 1px solid var(--ref-line); color: var(--ref-muted); font-size: 11px; line-height: 1.5; }
 .clerk-auth-card .auth-switch a { color: var(--ref-gold); font-weight: 800; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--ref-gold) 48%, transparent); text-underline-offset: 3px; }
 .clerk-auth-card .auth-switch a:hover { color: var(--ref-green-bright); }
+.clerk-auth-card .auth-admin-access { position: relative; z-index: 1; margin: 11px 0 0; color: var(--ref-muted); font-size: 10px; line-height: 1.5; text-align: center; }
+.clerk-auth-card .auth-admin-access a { color: var(--ref-green-bright); font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
 .auth-page-message { margin: 0 0 18px !important; }
 .auth-state-button { position: relative; z-index: 1; margin-top: 7px; }
 .auth-inline-action { position: relative; z-index: 1; margin-top: 18px; color: var(--ref-green-bright); }

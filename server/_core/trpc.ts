@@ -30,11 +30,11 @@ const requireCapability = (capability: Capability) => t.middleware(async ({ ctx,
 
 const requireApprovedSeller = t.middleware(async ({ ctx, next }) => {
   if (!ctx.user || !hasCapability(ctx.user, "seller:dashboard")) {
-    throw new TRPCError({ code: ctx.user ? "FORBIDDEN" : "UNAUTHORIZED", message: "Seller approval is required for this action." });
+    throw new TRPCError({ code: ctx.user ? "FORBIDDEN" : "UNAUTHORIZED", message: "Active seller access is required for this action." });
   }
   const application = await db.getSellerApplicationByUserId(ctx.user.id);
   if (!application || application.status !== "approved") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Seller approval is required for this action." });
+    throw new TRPCError({ code: "FORBIDDEN", message: "Active seller access is required for this action." });
   }
   return next({ ctx: { ...ctx, user: ctx.user, sellerApplication: application } });
 });

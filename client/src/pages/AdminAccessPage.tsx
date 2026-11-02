@@ -1,9 +1,7 @@
-import { SignIn, useAuth } from "@clerk/react";
+import { useAuth } from "@clerk/react";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { Link } from "wouter";
 import { useAuthRuntime } from "@/_core/auth-runtime";
-import { naijaKoblasClerkAppearance } from "@/auth-appearance";
-import { useTheme } from "@/contexts/ThemeContext";
 import { trpc } from "@/lib/trpc";
 import { NotificationBell } from "@/components/store/NotificationBell";
 import { AdminDashboardPage } from "./AccountPages";
@@ -28,9 +26,7 @@ export function AdminAccessPage() {
 
 function ClerkAdminGate() {
   const runtime = useAuthRuntime();
-  const { theme } = useTheme();
   const { isLoaded, isSignedIn } = useAuth();
-  const appearance = naijaKoblasClerkAppearance(theme);
   const account = trpc.auth.me.useQuery(undefined, {
     enabled: isLoaded && Boolean(isSignedIn),
     retry: false,
@@ -40,13 +36,10 @@ function ClerkAdminGate() {
     return <AdminStatusPage title="Loading secure sign-in" message="Clerk is checking the current session." />;
   }
   if (!isSignedIn) {
-    return <main className="admin-entry"><section className="admin-entry-card admin-entry-card--signin">
-      <span className="eyebrow">NaijaKoblas · Private operations</span><ShieldCheck size={28} />
-      <h1>Administrator sign-in</h1>
-      <p>This separate entry is for the designated administrator account. Staff access is managed after an administrator signs in.</p>
-      <div className="admin-clerk-signin"><SignIn routing="hash" forceRedirectUrl="/admin" fallbackRedirectUrl="/admin" signUpUrl="/signup" appearance={appearance} /></div>
+    return <AdminStatusPage title="Administrator sign-in" message="Use the same branded NaijaKoblas sign-in page as every other account. Administration opens only after the server confirms your admin role.">
+      <Link className="button button--dark" href="/login?returnTo=%2Fadmin">Sign in through the normal login <ArrowRight size={16} /></Link>
       <Link className="admin-return-link" href="/">Return to storefront</Link>
-    </section></main>;
+    </AdminStatusPage>;
   }
   if (account.isLoading) {
     return <AdminStatusPage title="Verifying administrator role" message="Your Clerk session is being matched to the marketplace account and its server-side role." />;

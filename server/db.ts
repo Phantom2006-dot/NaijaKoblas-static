@@ -21,6 +21,7 @@ import {
   type SellerApplicationStatus,
 } from "../drizzle/schema";
 import { canBootstrapInitialAdmin, canTransitionSellerApplication } from "./_core/authorization";
+import { decideSellerActivation } from "./commerce/seller-activation";
 import { ENV } from "./_core/env";
 import { canTransitionFulfillment, deriveFulfillmentOrderStatus, type FulfillmentStatus } from "./commerce/fulfillment";
 import { checkoutFingerprint } from "./commerce/idempotency";
@@ -266,6 +267,178 @@ export async function createSellerApplication(userId: number, input: SellerAppli
   });
 }
 
+const SELF_SERVICE_SELLER_NOTE = "Self-service activation; no application review or personal/business details were required.";
+
+function defaultSelfServiceStoreName(profileName: string | null) {
+  const name = profileName?.trim();
+  return name ? `${name.slice(0, 151)}'s Store` : `NaijaKoblas Store ${randomUUID().slice(0, 6).toUpperCase()}`;
+}
+
+export async function activateSellerAccount(userId: number) {
+  const database = await requireDb();
+  return database.transaction(async tx => {
+    const accountRows = await tx.select({ id: users.id, role: users.role, name: users.name, email: users.email })
+      .from(users).where(eq(users.id, userId)).limit(1).for("update");
+    const account = accountRows[0];
+    if (!account) throw new CommerceValidationError("Your account could not be found. Please sign in again.");
+    if (!account.email) throw new CommerceValidationError("A verified email is required before seller access can be activated.");
+
+    const applicationRows = await tx.select().from(sellerApplications)
+      .where(eq(sellerApplications.userId, userId)).limit(1).for("update");
+    const application = applicationRows[0] ?? null;
+    const storeRows = await tx.select().from(sellerStores)
+      .where(eq(sellerStores.userId, userId)).limit(1).for("update");
+    const existingStore = storeRows[0] ?? null;
+    const plan = decideSellerActivation({
+      role: account.role,
+      applicationStatus: application?.status ?? null,
+      storeExists: Boolean(existingStore),
+      storeActive: existingStore?.isActive ?? false,
+    });
+
+    if (plan.kind === "already_active") return { status: "already_active" as const, store: existingStore!, application };
+    if (plan.kind === "blocked") {
+      const message = plan.reason === "rejected_application"
+        ? "Seller access was previously declined. Contact NaijaKoblas support if you believe this is an error."
+        : plan.reason === "suspended_application"
+          ? "Seller access is currently paused. Contact NaijaKoblas support to request reinstatement."
+          : plan.reason === "inactive_store"
+            ? "This seller store is inactive. Contact NaijaKoblas support before trying to reactivate it."
+          : plan.reason === "missing_store"
+            ? "Your seller account is missing its store record. Contact NaijaKoblas support."
+            : plan.reason === "missing_application"
+              ? "Your seller account is missing its application record. Contact NaijaKoblas support."
+              : "This account role cannot be replaced with seller access.";
+      throw new CommerceValidationError(message);
+    }
+
+    const now = new Date();
+    const displayName = existingStore?.displayName
+      ?? application?.businessName
+      ?? defaultSelfServiceStoreName(account.name);
+    const city = existingStore?.city ?? application?.city ?? "Nigeria";
+    let activeApplication = application;
+
+    if (activeApplication?.status === "pending") {
+      const updated = await tx.update(sellerApplications).set({
+        status: "approved",
+        reviewNote: SELF_SERVICE_SELLER_NOTE,
+        reviewedByUserId: null,
+        reviewedAt: null,
+        updatedAt: now,
+      }).where(and(
+        eq(sellerApplications.id, activeApplication.id),
+        eq(sellerApplications.status, "pending"),
+      )).returning();
+      activeApplication = updated[0] ?? null;
+      if (!activeApplication) throw new CommerceValidationError("Your seller request changed. Refresh your account and try again.");
+    }
+
+    if (!activeApplication) {
+      const legalName = account.name?.trim().slice(0, 160) || "Not provided";
+      const inserted = await tx.insert(sellerApplications).values({
+        userId,
+        legalName,
+        email: account.email,
+        businessName: displayName,
+        craftSummary: "Self-service seller account. You can add product details and complete your store profile later.",
+        phone: "Not provided",
+        city,
+        status: "approved",
+        reviewNote: SELF_SERVICE_SELLER_NOTE,
+      }).returning();
+      activeApplication = inserted[0] ?? null;
+      if (!activeApplication) throw new Error("Seller access could not be activated.");
+    }
+
+    let store = existingStore;
+    if (store) {
+      const updated = await tx.update(sellerStores).set({ isActive: true, updatedAt: now })
+        .where(eq(sellerStores.userId, userId)).returning();
+      store = updated[0] ?? null;
+    } else {
+      const inserted = await tx.insert(sellerStores).values({
+        userId,
+        displayName,
+        city,
+        description: "Self-service seller store. Add products from your seller workspace and update these details whenever you are ready.",
+        isActive: true,
+      }).returning();
+      store = inserted[0] ?? null;
+    }
+    if (!store) throw new Error("Seller store could not be created.");
+
+    await tx.update(users).set({ role: "seller", updatedAt: now }).where(eq(users.id, userId));
+    await tx.insert(accountAuditEvents).values({
+      actorUserId: userId,
+      targetUserId: userId,
+      eventType: "seller_self_activated",
+      metadata: { applicationId: activeApplication.id, storeId: store.id, activationMethod: "one_click" },
+    });
+
+    const staffUsers = await tx.select({ id: users.id }).from(users).where(inArray(users.role, ["staff", "admin"]));
+    await tx.insert(userNotifications).values([
+      ...staffUsers.map(staff => ({
+        recipientUserId: staff.id,
+        eventKey: notificationEventKey("seller-self-activation", userId, "staff"),
+        category: "seller_application",
+        title: "A seller joined NaijaKoblas",
+        message: `${displayName} activated seller access directly. Their store profile can be completed later.`,
+        href: "/staff",
+      })),
+      {
+        recipientUserId: userId,
+        eventKey: notificationEventKey("seller-self-activation", userId, "seller"),
+        category: "seller_application",
+        title: "Your seller workspace is ready",
+        message: "Seller access is active. You can update your store profile and add listings whenever you are ready.",
+        href: "/seller",
+      },
+    ]).onConflictDoNothing();
+
+    return { status: "activated" as const, store, application: activeApplication };
+  });
+}
+
+export async function updateSellerStoreProfile(userId: number, input: {
+  displayName: string;
+  city: string;
+  description?: string;
+}) {
+  const database = await requireDb();
+  return database.transaction(async tx => {
+    const accountRows = await tx.select({ id: users.id, role: users.role }).from(users)
+      .where(eq(users.id, userId)).limit(1).for("update");
+    if (accountRows[0]?.role !== "seller") throw new CommerceValidationError("Only active sellers can update a store profile.");
+    const storeRows = await tx.select().from(sellerStores).where(eq(sellerStores.userId, userId)).limit(1).for("update");
+    const store = storeRows[0];
+    if (!store?.isActive) throw new CommerceValidationError("This seller store is not active.");
+    const applicationRows = await tx.select({ id: sellerApplications.id, status: sellerApplications.status })
+      .from(sellerApplications).where(eq(sellerApplications.userId, userId)).limit(1).for("update");
+    const application = applicationRows[0];
+    if (application && application.status !== "approved") throw new CommerceValidationError("Seller access is not active.");
+
+    const updatedAt = new Date();
+    const updated = await tx.update(sellerStores).set({
+      displayName: input.displayName,
+      city: input.city,
+      description: input.description?.trim() || null,
+      updatedAt,
+    }).where(eq(sellerStores.userId, userId)).returning();
+    if (application) {
+      await tx.update(sellerApplications).set({ businessName: input.displayName, city: input.city, updatedAt })
+        .where(eq(sellerApplications.id, application.id));
+    }
+    await tx.insert(accountAuditEvents).values({
+      actorUserId: userId,
+      targetUserId: userId,
+      eventType: "seller_store_profile_updated",
+      metadata: { storeId: store.id },
+    });
+    return updated[0]!;
+  });
+}
+
 export async function listSellerApplications(status?: SellerApplicationStatus) {
   const database = await requireDb();
   const selection = {
@@ -292,18 +465,23 @@ export async function transitionSellerApplication(input: {
 }) {
   const database = await requireDb();
   return database.transaction(async tx => {
-    const applications = await tx.select().from(sellerApplications)
+    const applicationRefs = await tx.select({ id: sellerApplications.id, userId: sellerApplications.userId })
+      .from(sellerApplications)
       .where(eq(sellerApplications.id, input.applicationId)).limit(1);
-    const application = applications[0];
-    if (!application) return { success: false as const, reason: "not_found" as const };
-    if (!canTransitionSellerApplication(application.status, input.status)) {
-      return { success: false as const, reason: "invalid_transition" as const };
-    }
-    const applicants = await tx.select().from(users).where(eq(users.id, application.userId)).limit(1);
+    const applicationRef = applicationRefs[0];
+    if (!applicationRef) return { success: false as const, reason: "not_found" as const };
+    const applicants = await tx.select().from(users).where(eq(users.id, applicationRef.userId)).limit(1).for("update");
     const applicant = applicants[0];
     if (!applicant) return { success: false as const, reason: "account_missing" as const };
     if (applicant.role === "staff" || applicant.role === "admin") {
       return { success: false as const, reason: "privileged_account" as const };
+    }
+    const applications = await tx.select().from(sellerApplications)
+      .where(eq(sellerApplications.id, input.applicationId)).limit(1).for("update");
+    const application = applications[0];
+    if (!application) return { success: false as const, reason: "not_found" as const };
+    if (!canTransitionSellerApplication(application.status, input.status)) {
+      return { success: false as const, reason: "invalid_transition" as const };
     }
     const updatedAt = new Date();
     const updated = await tx.update(sellerApplications).set({
