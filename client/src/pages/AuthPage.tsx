@@ -1,5 +1,5 @@
 import { SignIn, SignUp, useAuth } from "@clerk/react";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "wouter";
 import { safeAuthReturnTo } from "@/const";
@@ -14,24 +14,13 @@ export function AuthPage({ signup = false }: { signup?: boolean }) {
   return <ClerkAuthFlow signup={signup} />;
 }
 
-function AuthFrame({ theme, children }: { theme: "light" | "dark"; children: ReactNode }) {
+function AuthFrame({ children }: { children: ReactNode }) {
   return <main className="naija-auth-page">
-    <AuthLocalBar theme={theme} />
     <section className="auth-reference-layout container-wide">
       <div className="auth-card clerk-auth-card">{children}</div>
       <BrandStoryPanel />
     </section>
   </main>;
-}
-
-function AuthLocalBar({ theme }: { theme: "light" | "dark" }) {
-  return <div className="auth-localbar container-wide">
-    <div className="auth-localbar-brand">
-      <img src={theme === "dark" ? "/naija-koblas-logo-white.png" : "/naija-koblas-logo-light.png"} alt="NaijaKoblas" />
-      <span className="auth-localbar-note">Craft · Culture · Commerce <i /> Lagos, Nigeria</span>
-    </div>
-    <Link className="auth-home-link" href="/">Back to the store <ArrowRight size={15} /></Link>
-  </div>;
 }
 
 function BrandStoryPanel() {
@@ -57,7 +46,6 @@ function AuthIntro({ label, title, copy }: { label: string; title: string; copy:
 }
 
 function ClerkSetupNotice({ status }: { status: string }) {
-  const { theme } = useTheme();
   const message = status === "checking"
     ? "Checking the secure sign-in configuration for this deployment."
     : status === "server-unconfigured"
@@ -68,7 +56,7 @@ function ClerkSetupNotice({ status }: { status: string }) {
           ? "The storefront and marketplace API are configured for different Clerk applications."
           : "The storefront could not confirm that secure sign-in is available. Please try again later.";
 
-  return <AuthFrame theme={theme}>
+  return <AuthFrame>
     <AuthIntro label="NaijaKoblas account access" title="Your craft connection is being prepared." copy="One secure account for shopping, orders and your seller journey." />
     <p className="auth-page-message">{message} The storefront remains open while account access is configured.</p>
     <Link className="button button--lime button--full auth-state-button" href="/">Return to the storefront <ArrowRight size={16} /></Link>
@@ -91,7 +79,7 @@ function ClerkAuthFlow({ signup }: { signup: boolean }) {
         : ["My account", "/account"];
   const appearance = naijaKoblasClerkAppearance(theme);
 
-  return <AuthFrame theme={theme}>
+  return <AuthFrame>
     {emailVerificationRequired
       ? <>
           <AuthIntro label="Email verification required" title="Verify your primary email." copy="NaijaKoblas keeps every marketplace account connected to a verified identity." />
