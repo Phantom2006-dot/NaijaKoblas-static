@@ -2,6 +2,8 @@ import { SignIn, useAuth } from "@clerk/react";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { Link } from "wouter";
 import { useAuthRuntime } from "@/_core/auth-runtime";
+import { naijaKoblasClerkAppearance } from "@/auth-appearance";
+import { useTheme } from "@/contexts/ThemeContext";
 import { trpc } from "@/lib/trpc";
 import { NotificationBell } from "@/components/store/NotificationBell";
 import { AdminDashboardPage } from "./AccountPages";
@@ -26,7 +28,9 @@ export function AdminAccessPage() {
 
 function ClerkAdminGate() {
   const runtime = useAuthRuntime();
+  const { theme } = useTheme();
   const { isLoaded, isSignedIn } = useAuth();
+  const appearance = naijaKoblasClerkAppearance(theme);
   const account = trpc.auth.me.useQuery(undefined, {
     enabled: isLoaded && Boolean(isSignedIn),
     retry: false,
@@ -40,7 +44,7 @@ function ClerkAdminGate() {
       <span className="eyebrow">NaijaKoblas · Private operations</span><ShieldCheck size={28} />
       <h1>Administrator sign-in</h1>
       <p>This separate entry is for the designated administrator account. Staff access is managed after an administrator signs in.</p>
-      <div className="admin-clerk-signin"><SignIn routing="hash" forceRedirectUrl="/admin" fallbackRedirectUrl="/admin" signUpUrl="/signup" /></div>
+      <div className="admin-clerk-signin"><SignIn routing="hash" forceRedirectUrl="/admin" fallbackRedirectUrl="/admin" signUpUrl="/signup" appearance={appearance} /></div>
       <Link className="admin-return-link" href="/">Return to storefront</Link>
     </section></main>;
   }

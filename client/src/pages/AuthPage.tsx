@@ -1,24 +1,59 @@
 import { SignIn, SignUp, useAuth } from "@clerk/react";
 import { ArrowRight, ShieldCheck } from "lucide-react";
+import type { ReactNode } from "react";
 import { Link } from "wouter";
 import { safeAuthReturnTo } from "@/const";
 import { useAuthRuntime } from "@/_core/auth-runtime";
+import { naijaKoblasClerkAppearance } from "@/auth-appearance";
 import { useTheme } from "@/contexts/ThemeContext";
 import { trpc } from "@/lib/trpc";
-
-const appearance = {
-  variables: {
-    colorPrimary: "#a9c847",
-    colorTextOnPrimaryBackground: "#1b1b18",
-    borderRadius: "0.5rem",
-    fontFamily: "inherit",
-  },
-};
 
 export function AuthPage({ signup = false }: { signup?: boolean }) {
   const runtime = useAuthRuntime();
   if (runtime.status !== "ready") return <ClerkSetupNotice status={runtime.status} />;
   return <ClerkAuthFlow signup={signup} />;
+}
+
+function AuthFrame({ theme, children }: { theme: "light" | "dark"; children: ReactNode }) {
+  return <main className="naija-auth-page">
+    <AuthLocalBar theme={theme} />
+    <section className="auth-reference-layout container-wide">
+      <div className="auth-card clerk-auth-card">{children}</div>
+      <BrandStoryPanel />
+    </section>
+  </main>;
+}
+
+function AuthLocalBar({ theme }: { theme: "light" | "dark" }) {
+  return <div className="auth-localbar container-wide">
+    <div className="auth-localbar-brand">
+      <img src={theme === "dark" ? "/naija-koblas-logo-white.png" : "/naija-koblas-logo-light.png"} alt="NaijaKoblas" />
+      <span className="auth-localbar-note">Craft · Culture · Commerce <i /> Lagos, Nigeria</span>
+    </div>
+    <Link className="auth-home-link" href="/">Back to the store <ArrowRight size={15} /></Link>
+  </div>;
+}
+
+function BrandStoryPanel() {
+  return <aside className="auth-benefits auth-brand-panel" aria-label="NaijaKoblas brand story">
+    <img className="auth-brand-panel-image" src="/naijakoblas-hero.jpg" alt="" aria-hidden="true" />
+    <div className="auth-brand-panel-wash" aria-hidden="true" />
+    <div className="auth-brand-content">
+      <span className="auth-brand-kicker"><i /> MADE IN NIGERIA · CURATED FOR EVERYWHERE</span>
+      <div className="auth-brand-stamp" aria-hidden="true"><span>NK</span><small>EST. LAGOS</small></div>
+      <h2>Rooted in craft.<br /><em>Ready for everywhere.</em></h2>
+      <p>Discover distinctive Nigerian leather goods, selected for the rhythm of everyday life.</p>
+      <div className="auth-brand-signature"><span>CRAFT</span><span>CULTURE</span><span>COMMERCE</span></div>
+    </div>
+  </aside>;
+}
+
+function AuthIntro({ label, title, copy }: { label: string; title: string; copy: string }) {
+  return <div className="auth-form-intro">
+    <span className="auth-brand-eyebrow"><i />{label}</span>
+    <h1>{title}</h1>
+    <p>{copy}</p>
+  </div>;
 }
 
 function ClerkSetupNotice({ status }: { status: string }) {
@@ -33,14 +68,11 @@ function ClerkSetupNotice({ status }: { status: string }) {
           ? "The storefront and marketplace API are configured for different Clerk applications."
           : "The storefront could not confirm that secure sign-in is available. Please try again later.";
 
-  return <main>
-    <div className="auth-localbar container-wide"><img src={theme === "dark" ? "/naija-koblas-logo-white.png" : "/naija-koblas-logo-light.png"} alt="Naija Koblas" /><Link href="/">← Back to Home</Link></div>
-    <section className="auth-reference-layout container-wide"><div className="auth-card">
-      <span className="eyebrow">Account sign-in</span><h1>Authentication is being configured.</h1>
-      <p>{message} The public storefront remains available, but account actions require the same Clerk application on the website and API.</p>
-      <Link className="button button--dark button--full" href="/">Return to the storefront <ArrowRight size={17} /></Link>
-    </div><aside className="auth-benefits"><h2>One account.<br />Trusted access.</h2><ul><li><ShieldCheck size={18} />Verified email and password sign-in</li><li><ShieldCheck size={18} />Password recovery handled by Clerk</li><li><ShieldCheck size={18} />Seller and administrator roles stay server-protected</li></ul></aside></section>
-  </main>;
+  return <AuthFrame theme={theme}>
+    <AuthIntro label="NaijaKoblas account access" title="Your craft connection is being prepared." copy="One secure account for shopping, orders and your seller journey." />
+    <p className="auth-page-message">{message} The storefront remains open while account access is configured.</p>
+    <Link className="button button--lime button--full auth-state-button" href="/">Return to the storefront <ArrowRight size={16} /></Link>
+  </AuthFrame>;
 }
 
 function ClerkAuthFlow({ signup }: { signup: boolean }) {
@@ -57,25 +89,37 @@ function ClerkAuthFlow({ signup }: { signup: boolean }) {
     : account.data?.role === "staff" ? ["Staff portal", "/staff"]
       : account.data?.role === "admin" ? ["Admin portal", "/admin"]
         : ["My account", "/account"];
+  const appearance = naijaKoblasClerkAppearance(theme);
 
-  return <main>
-    <div className="auth-localbar container-wide"><img src={theme === "dark" ? "/naija-koblas-logo-white.png" : "/naija-koblas-logo-light.png"} alt="Naija Koblas" /><Link href="/">← Back to Home</Link></div>
-    <section className="auth-reference-layout container-wide">
-      <div className="auth-card clerk-auth-card">
-        {emailVerificationRequired ? <><span className="eyebrow">Email verification required</span><h1>Verify your primary email.</h1><p>NaijaKoblas requires a verified primary email before creating or accessing a marketplace account. Complete verification with Clerk, then return and refresh this page.</p>{runtime.isSignedIn && <button type="button" className="text-button" onClick={() => { if (runtime.signOut) void runtime.signOut(); }}>Sign out</button>}</>
-          : !isLoaded ? <><span className="eyebrow">Secure account</span><h1>Connecting to Clerk…</h1><p>Preparing secure sign-in.</p></>
-            : isSignedIn ? account.isLoading ? <><span className="eyebrow">Your account</span><h1>Finishing account setup…</h1><p>Connecting your verified Clerk identity to your NaijaKoblas account.</p></>
-              : account.error ? <><span className="eyebrow">Account connection</span><h1>We could not load your account.</h1><p>Authentication succeeded, but the marketplace account service could not be reached. Please try again shortly.</p><Link className="button button--dark button--full" href="/">Return to the storefront <ArrowRight size={17} /></Link></>
-                : account.data ? <><span className="eyebrow">Signed in securely</span><h1>Welcome{account.data.name ? `, ${account.data.name}` : " back"}.</h1><p>Your NaijaKoblas role is <strong>{account.data.role}</strong>. Access is assigned on the server.</p><Link className="button button--dark button--full" href={returnTo}>{returnTo === "/account" ? portal[0] : "Continue"} <ArrowRight size={17} /></Link></>
-                  : <><span className="eyebrow">Account connection</span><h1>Your profile is not ready yet.</h1><p>Clerk signed you in, but the backend did not return a NaijaKoblas account. Please retry once or contact support.</p><Link className="button button--dark button--full" href="/">Return to the storefront <ArrowRight size={17} /></Link></>
-            : <><span className="eyebrow">{signup ? "Join NaijaKoblas" : "Welcome back"}</span><h1>{signup ? "Create your account" : "Sign in securely"}</h1><p>Your Clerk account handles password sign-in, email verification and password recovery. Marketplace roles remain stored and controlled by NaijaKoblas.</p>
+  return <AuthFrame theme={theme}>
+    {emailVerificationRequired
+      ? <>
+          <AuthIntro label="Email verification required" title="Verify your primary email." copy="NaijaKoblas keeps every marketplace account connected to a verified identity." />
+          <p className="auth-page-message">Complete the verification step with Clerk, then return here and refresh. Your seller or administrator role remains protected by NaijaKoblas.</p>
+          {runtime.isSignedIn && <button type="button" className="text-button auth-inline-action" onClick={() => { if (runtime.signOut) void runtime.signOut(); }}>Sign out</button>}
+        </>
+      : !isLoaded
+        ? <><AuthIntro label="Secure member access" title="Preparing your account." copy="Connecting to NaijaKoblas securely." /><p className="auth-page-message">Please wait while Clerk checks your current session.</p></>
+        : isSignedIn
+          ? account.isLoading
+            ? <><AuthIntro label="Your account" title="Finishing your sign-in." copy="Your verified Clerk identity is being matched to your marketplace account." /><p className="auth-page-message">This should only take a moment.</p></>
+            : account.error
+              ? <><AuthIntro label="Account connection" title="We could not load your account." copy="Authentication succeeded, but the marketplace account service could not be reached." /><p className="auth-page-message">Please try again shortly or return to the store.</p><Link className="button button--lime button--full auth-state-button" href="/">Return to the storefront <ArrowRight size={16} /></Link></>
+              : account.data
+                ? <><AuthIntro label="Signed in securely" title={`Welcome${account.data.name ? `, ${account.data.name}` : " back"}.`} copy={`Your NaijaKoblas access is ready. Your account role is ${account.data.role}.`} /><Link className="button button--lime button--full auth-state-button" href={returnTo}>{returnTo === "/account" ? portal[0] : "Continue"} <ArrowRight size={16} /></Link></>
+                : <><AuthIntro label="Account connection" title="Your profile is not ready yet." copy="Clerk signed you in, but the marketplace did not return a NaijaKoblas account." /><p className="auth-page-message">Please retry once or contact support.</p><Link className="button button--lime button--full auth-state-button" href="/">Return to the storefront <ArrowRight size={16} /></Link></>
+          : <>
+              <AuthIntro
+                label={signup ? "Join the NaijaKoblas community" : "Secure member access"}
+                title={signup ? "Find your place in the craft." : "Welcome back to the craft."}
+                copy={signup
+                  ? "Create one trusted account to discover makers, follow orders and begin your seller journey."
+                  : "Shop Nigerian-made leather goods, track your orders or return to your seller workspace."}
+              />
               <div className="clerk-auth-widget">{signup
                 ? <SignUp routing="hash" signInUrl={signInUrl} forceRedirectUrl={returnTo} fallbackRedirectUrl={returnTo} appearance={appearance} />
                 : <SignIn routing="hash" signUpUrl={signUpUrl} forceRedirectUrl={returnTo} fallbackRedirectUrl={returnTo} appearance={appearance} />}</div>
-              <p className="auth-switch">{signup ? "Already registered?" : "New here?"} <Link href={signup ? signInUrl : signUpUrl}>{signup ? "Sign in" : "Create an account"}</Link></p>
+              <p className="auth-switch">{signup ? "Already part of NaijaKoblas?" : "New to NaijaKoblas?"} <Link href={signup ? signInUrl : signUpUrl}>{signup ? "Sign in" : "Create your account"}</Link></p>
             </>}
-      </div>
-      <aside className="auth-benefits"><h2>One account.<br />Trusted access.</h2><ul><li><span>01</span>Shop authentic Nigerian leather goods</li><li><span>02</span>Apply to sell from your verified identity</li><li><span>03</span>Staff and administrator roles stay server-protected</li><li><span>04</span>Password recovery stays with Clerk</li></ul></aside>
-    </section>
-  </main>;
+  </AuthFrame>;
 }
