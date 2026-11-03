@@ -76,11 +76,20 @@ export function Navbar() {
     ["Products", "/products"],
     ["Why Koblas", "/about"],
     ["Contact Us", "/contact"],
-    ["Become a Vendor", "/vendor"],
-    ["Get Started", "/waitlist"],
   ];
-  if (auth.user?.role === "seller") links.push(["Seller Workspace", "/seller"]);
-  if (auth.user?.role === "staff") links.push(["Staff Portal", "/staff"]);
+  if (auth.loading) {
+    links.push(["Shop", "/products"]);
+  } else if (!auth.isAuthenticated) {
+    links.push(["Join the Waitlist", "/waitlist"]);
+  } else if (auth.user?.role === "seller") {
+    links.push(["Seller Workspace", "/seller"]);
+  } else if (auth.user?.role === "staff") {
+    links.push(["Staff Portal", "/staff"]);
+  } else if (auth.user?.role === "admin") {
+    links.push(["Admin Portal", "/admin"]);
+  } else {
+    links.push(["Become a Seller", "/vendor"]);
+  }
   links.push(auth.isAuthenticated ? ["Account", "/account"] : ["Sign In", "/login"]);
   return <header className="site-header">
     <div className="nav-inner container-wide">
@@ -91,9 +100,9 @@ export function Navbar() {
       <div className="nav-actions">
         <button className="icon-button nav-search" aria-label="Search" onClick={() => navigate("/products")}><Search size={18} /></button>
         <button className="icon-button nav-theme" aria-label="Toggle theme" aria-pressed={theme === "dark"} onClick={() => toggleTheme?.()}><Sparkles size={17} /></button>
-        <NotificationBell />
-        <Link href="/account" className="account-link">Account</Link>
-        <Link href="/account" className="mobile-account-button" aria-label="Account"><UserRound size={18} /></Link>
+        {auth.isAuthenticated && <NotificationBell />}
+        {auth.isAuthenticated ? <Link href="/account" className="account-link">Account</Link> : <Link href="/login" className="account-link">Sign In</Link>}
+        <Link href={auth.isAuthenticated ? "/account" : "/login"} className="mobile-account-button" aria-label={auth.isAuthenticated ? "Account" : "Sign in"}><UserRound size={18} /></Link>
         <Link href="/cart" className="cart-link" aria-label={`Cart with ${cartCount} items`}><ShoppingBag size={19} /><span>{cartCount}</span></Link>
         <button ref={menuButtonRef} type="button" className="icon-button mobile-menu-button" aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open} aria-controls="primary-navigation" onClick={() => setOpen((value) => !value)}>{open ? <X size={22} /> : <Menu size={22} />}</button>
       </div>
@@ -104,6 +113,7 @@ export function Navbar() {
 export function Footer() {
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const auth = useAuth();
   return <footer className="site-footer">
     <div className="container-wide footer-newsletter">
       <div className="footer-newsletter-copy"><span className="eyebrow eyebrow--light">Stay connected</span><h2>Stay close to the craft.</h2><p>New collections, artisan stories, and early access — thoughtfully delivered.</p></div>
@@ -115,7 +125,7 @@ export function Footer() {
     <div className="container-wide footer-main">
       <div className="footer-about"><BrandMark light /><p>Connecting craftsmanship, culture and commerce through premium African leather goods.</p><span className="footer-location">Lagos, Nigeria · Made with purpose.</span><div className="social-links"><a href="https://instagram.com" aria-label="Instagram"><Instagram size={17} /></a><a href="https://linkedin.com" aria-label="LinkedIn"><Linkedin size={17} /></a><a href="https://wa.me" aria-label="WhatsApp">WA</a></div></div>
       <div className="footer-column"><h3>Products</h3><Link href="/products?category=Shoes">Shoes</Link><Link href="/products?category=Bags">Bags</Link><Link href="/products?category=Belts">Belts</Link><Link href="/products?category=Accessories">Accessories</Link></div>
-      <div className="footer-column"><h3>Company</h3><Link href="/about">About Us</Link><Link href="/vendor">Become a Vendor</Link><Link href="/contact">Contact</Link></div>
+      <div className="footer-column"><h3>Company</h3><Link href="/about">About Us</Link>{auth.user?.role === "seller" ? <Link href="/seller">Seller Workspace</Link> : auth.user?.role === "staff" ? <Link href="/staff">Staff Portal</Link> : auth.user?.role === "admin" ? <Link href="/admin">Admin Portal</Link> : <Link href="/vendor">Become a Seller</Link>}<Link href="/contact">Contact</Link></div>
       <div className="footer-column"><h3>Support</h3><Link href="/info/help">Help Center</Link><Link href="/info/shipping">Shipping Info</Link><Link href="/info/returns">Returns</Link></div>
     </div>
     <div className="container-wide footer-bottom"><span>© 2026 NaijaKoblas. All rights reserved.</span><span><Link href="/info/privacy">Privacy Policy</Link><Link href="/info/terms">Terms of Service</Link></span></div>

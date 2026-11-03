@@ -9,6 +9,7 @@ import { fulfillmentStatuses } from "./commerce/fulfillment";
 import * as db from "./db";
 import { initializePaystackCheckout, verifyPaystackTransaction } from "./payments/paystack";
 import { classifyPaystackTransaction } from "./payments/reconciliation";
+import { productStatuses } from "../drizzle/schema";
 
 const reviewInput = z.object({
   applicationId: z.number().int().positive(),
@@ -327,6 +328,17 @@ export const appRouter = router({
 
   admin: router({
     users: adminProcedure.query(() => db.listUsersForAdmin()),
+    products: adminProcedure.input(z.object({
+      afterId: z.string().min(1).max(64).optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+      search: z.string().trim().max(120).optional(),
+      status: z.enum(productStatuses).optional(),
+    }).optional()).query(({ input }) => db.listProductsForAdmin(input ?? {})),
+    audit: adminProcedure.input(z.object({
+      afterId: z.number().int().positive().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+      eventType: z.string().trim().min(1).max(96).optional(),
+    }).optional()).query(({ input }) => db.listAuditEventsForAdmin(input ?? {})),
     pendingPayments: adminProcedure.input(z.object({
       afterId: z.number().int().positive().optional(),
       limit: z.number().int().min(1).max(100).optional(),

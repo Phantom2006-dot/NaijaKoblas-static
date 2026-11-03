@@ -9,26 +9,47 @@
 - Sellers keep one account for shopping and store management. Staff/admin can create seller-owned drafts for active seller stores. The seller must add/select a primary product photo, retain available stock and publish their own listing.
 - Product photo uploads use an authenticated Cloudinary-only endpoint. It validates session, role and seller/store/product ownership before parsing and again at persistence; accepts JPEG/PNG/WebP with signature validation; limits a file to 8 MB, a batch to 4 files/32 MB and a listing to 10 images. One batch is allowed per API process; the slot remains reserved through parser cleanup and all upload/database/compensation work, even after client disconnect. Account uploads are limited to 12 batches/10 minutes per process. New listing APIs reject arbitrary remote image URLs; existing HTTPS image values are legacy-only format `external`.
 - Notification inbox items are recipient-scoped, safe-local-link, idempotent records. Direct seller activation, legacy seller review/moderation, staff access, payment, fulfillment and staff intake events are written transactionally with business state where implemented. UI polling is 45 seconds with read/mark-all, Escape/outside-close, focus return and keyboard disclosure behavior. No email/SMS/push delivery worker is implemented.
-- The PostgreSQL gallery and notification migrations are applied. The runner sets local `search_path` to `public`, fingerprints the existing baseline against DDL recreated in a scratch schema, validates an exact ordered journal prefix, preflights later objects/data targets, serializes with a transaction advisory lock and commits pending DDL/ledger rows atomically. The strict parser rejects unsupported/commented or multi-command migration chunks until explicit parser rules and tests are added. Package `db:migrate` and `db:push` route through the custom runner.
-- The checked-in localhost-only migration harness covers fresh setup, exact baseline adoption/data preservation, enum/schema mismatch, sequence-owner mismatch, unledgered later schema, constraint-only and data-only targets, history gap, ambient `search_path` and concurrency. It creates/drops only its own random temporary databases.
+- The PostgreSQL gallery and notification migrations are applied. The runner sets local `search_path` to `public`, fingerprints the existing baseline against DDL recreated in a scratch schema, validates an exact ordered journal prefix, preflights later objects/data targets, serializes with a transaction advisory lock and commits pending DDL/ledger rows atomically. Package `db:migrate` and `db:push` route through the custom runner.
 
-## Current live deployment
+## Current live deployment and configuration
 
-- Vercel production for `naijakoblas-static` includes feature commit `f272c56e2809df589dd3154ae27eb1966a46f192` and is READY. The production `/`, `/login`, `/signup`, `/admin`, `/vendor` and `/account` routes returned HTTP 200; the deployed JS bundle contains the one-click seller and standard admin-login UI. Its `/api/*` proxy reaches Fly.
-- Fly app `naijakoblas-static` is release v10/image `marketplace-f272c56`, with exactly one `shared-cpu-1x` 512 MB machine in Amsterdam on port 3000. The release command completed successfully; no schema changes were required. Direct Fly and Vercel-proxied `/api/health` and `/api/auth/status` returned HTTP 200. The existing machine was stopped after smoke tests; autostart/stop-on-idle remains enabled.
-- Fly has `DATABASE_URL`, `APP_BASE_URL` and the Clerk key pair. `DATABASE_URL_UNPOOLED` is absent. `CLOUDINARY_*`, Paystack keys and `OWNER_CLERK_USER_ID` are not configured. No new administrator account was created or promoted; no passwords or verification codes were generated or shared.
-- The Neon test project contains the approved baseline plus gallery/notification migrations; no controlled seller/listing was created. The old `naijakoblas-api-test` app still has an unused staged Neon secret; remove it only after confirming it is no longer needed.
+- Vercel production for `naijakoblas-static` includes feature commit `f272c56e2809df589dd3154ae27eb1966a46f192` and is READY. The production `/`, `/login`, `/signup`, `/admin`, `/vendor` and `/account` routes returned HTTP 200; its `/api/*` proxy reaches Fly.
+- Fly app `naijakoblas-static` is release v10/image `marketplace-f272c56`, with exactly one `shared-cpu-1x` 512 MB machine in Amsterdam on port 3000. Cloudinary credentials and the protected `OWNER_CLERK_USER_ID` are now configured through Fly Secrets; the Cloudinary connection was verified with a non-secret provider ping. Paystack remains unconfigured and seller payouts remain disabled.
+- The first-admin bootstrap ID was configured from the user-supplied verified Clerk user ID. No password or verification code was created or shared.
 
-## Validation and remaining risks
+## Completed role audit
 
-- Passing locally: `pnpm check`; `pnpm test` (19 files/94 tests, including direct-activation decision cases and a router-level test that the retired application endpoint performs no write); `pnpm build`; `pnpm build:static`; and `git diff --check`. An AMD64 Fly image built and pushed from the exact deployed commit.
-- Prior migration validation passed the checked-in localhost PostgreSQL regression harness and two `pnpm db:migrate` runs against a disposable local database. No seller/customer business records were created as part of this feature.
-- One-click activation was not exercised with a real verified non-admin account. Admin bootstrap has not been exercised. No authenticated seller upload, Cloudinary persistence/cleanup, Paystack transaction, refund or vendor payout has been tested end to end. Live payments and seller payouts remain disabled.
-- Residual operational limits: upload concurrency/rate limiting is process-local and must be shared if scaling beyond one API machine; no durable Cloudinary orphan reconciler or external notification worker exists.
+- [x] Audited customer, seller, staff and admin flows, compared the local ShabaAutos operations patterns read-only, and researched role-aware navigation, product catalog administration, permissions and audit timelines.
+- [x] Recorded detailed findings in the `audit-*.md` files and synthesized the implementation plan in `ROLE_WORKFLOW_AUDIT.md`.
 
-## Next
+## Phase 1 — role-aware storefront navigation
 
-1. Add `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` through Fly protected Secrets, then test upload, primary-photo selection, seller publish, staff/admin draft flow, public gallery, ownership denial and cleanup with a controlled verified seller/listing.
-2. Create and verify the intended administrator account through the normal `/signup` flow. Then securely set that exact Clerk user ID as Fly’s `OWNER_CLERK_USER_ID` and verify first-admin bootstrap and `/admin` isolation. Do not share passwords or email codes. Bootstrap only succeeds if no administrator already exists.
-3. Configure Paystack test credentials/webhook and test payment/inventory transitions. Keep live payments and vendor payouts disabled.
-4. Remove the old app’s unused Neon secret only after confirming it is no longer needed. Define seller settlements and refunds before any split/payout implementation.
+- [ ] Replace unconditional `Become a Vendor` and `Get Started` header/footer links with one shared effective-role navigation policy.
+- [ ] Show active sellers `Seller Workspace`, staff `Staff Portal`, and administrators `Admin Portal`; keep sellers’ customer Account and shopping access visible.
+- [ ] Make anonymous and auth-loading states explicit so the navbar does not flash the wrong role or show Account as already available.
+- [ ] Apply the same role-aware behavior to homepage, About and vendor CTAs; reconcile all route manifests, including `/seller-fulfillment`.
+
+## Phase 2 — protected admin catalog and audit workspace
+
+- [ ] Add admin-only overview counts and a searchable/cursor-paginated catalog ledger covering drafts, published, archived and out-of-stock products, seller/store ownership, image completeness and timestamps.
+- [ ] Add protected product detail with gallery/provider metadata and product activity history; never expose provider secrets.
+- [ ] Add a readable admin audit timeline with actor, event, target, timestamp and redacted metadata.
+- [ ] Keep admin staff-role controls explicit and protected; do not add a generic role dropdown or client-controlled actor identity.
+
+## Phase 3 — operational records and admin sections
+
+- [ ] Add first-class audit targets/indexes or a generalized append-only audit table, then instrument product/image/inventory/order/payment events.
+- [ ] Add admin orders, payment history/reconciliation context, sellers/stores, paginated people and operations/provider-readiness sections.
+- [ ] Correct fulfilment audit actor attribution so the authenticated requester—not merely the seller owner—is recorded.
+
+## Phase 4 — staff and seller completeness
+
+- [ ] Add staff listing moderation queues, structured safety/reinstatement cases and operational queue notifications while retaining server-side role boundaries.
+- [ ] Add seller publish-readiness checklists, full product editing, image lifecycle controls, inventory visibility and more capable fulfilment operations.
+- [ ] Keep self-service activation policy explicit: staff oversee safety and legacy records; they do not need to approve every newly activated seller.
+
+## Still pending
+
+- [ ] Verify Cloudinary uploads with a real seller listing after the corrected matching Cloudinary credentials; values remain provider-managed and are never stored in Git/chat.
+- [ ] Configure and test Paystack test-mode credentials/webhook before end-to-end checkout reconciliation; seller payouts remain disabled.
+- [ ] Exercise the protected first-admin bootstrap with the intended verified Clerk account and confirm the admin dashboard access.

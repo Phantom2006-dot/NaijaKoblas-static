@@ -32,6 +32,7 @@ function Router() {
     <Route path="/seller-fulfillment" component={SuspendedSellerFulfillmentPage} />
     <Route path="/seller" component={SellerWorkspacePage} />
     <Route path="/staff" component={StaffWorkspacePage} />
+    <Route path="/admin/:section" component={AdminAccessPage} />
     <Route path="/admin" component={AdminAccessPage} />
     <Route path="/info/:topic" component={InfoPage} />
     <Route path="/404" component={NotFound} />

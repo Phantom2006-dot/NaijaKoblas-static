@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, gt, ilike, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -19,6 +19,7 @@ import {
   type DeliveryMethod,
   type InsertUser,
   type SellerApplicationStatus,
+  productStatuses,
 } from "../drizzle/schema";
 import { canBootstrapInitialAdmin, canTransitionSellerApplication } from "./_core/authorization";
 import { decideSellerActivation } from "./commerce/seller-activation";
@@ -67,6 +68,16 @@ async function requireDb() {
   const database = await getDb();
   if (!database) throw new Error("Database is not available");
   return database;
+}
+
+function redactAuditMetadata(value: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!value) return null;
+  const blocked = /token|secret|password|authorization|checkouturl|providerresponse|apikey/i;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => {
+    if (blocked.test(key)) return [key, "[redacted]"];
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) return [key, redactAuditMetadata(entry as Record<string, unknown>)];
+    return [key, entry];
+  }));
 }
 
 type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
@@ -206,6 +217,76 @@ export async function listPendingPaymentsForAdmin(input: { afterId?: number; lim
     )).orderBy(asc(paymentTransactions.id)).limit(limit + 1);
   const hasMore = rows.length > limit;
   const items = rows.slice(0, limit);
+  return { items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
+}
+
+export async function listProductsForAdmin(input: {
+  afterId?: string;
+  limit?: number;
+  search?: string;
+  status?: typeof productStatuses[number];
+} = {}) {
+  const database = await requireDb();
+  const limit = Math.max(1, Math.min(input.limit ?? 40, 100));
+  const search = input.search?.trim();
+  const rows = await database.select({
+    id: sellerProducts.id,
+    name: sellerProducts.name,
+    category: sellerProducts.category,
+    priceKobo: sellerProducts.priceKobo,
+    inventoryCount: sellerProducts.inventoryCount,
+    status: sellerProducts.status,
+    createdAt: sellerProducts.createdAt,
+    updatedAt: sellerProducts.updatedAt,
+    sellerUserId: sellerProducts.sellerUserId,
+    sellerName: users.name,
+    sellerEmail: users.email,
+    storeName: sellerStores.displayName,
+    storeCity: sellerStores.city,
+    storeActive: sellerStores.isActive,
+    imageCount: sql<number>`(select count(*)::int from ${sellerProductImages} as spi where spi."productId" = ${sellerProducts.id})`,
+    primaryImageCount: sql<number>`(select count(*)::int from ${sellerProductImages} as spi where spi."productId" = ${sellerProducts.id} and spi."isPrimary" = true)`,
+  }).from(sellerProducts)
+    .innerJoin(users, eq(users.id, sellerProducts.sellerUserId))
+    .leftJoin(sellerStores, eq(sellerStores.userId, sellerProducts.sellerUserId))
+    .where(and(
+      ...(input.afterId === undefined ? [] : [lt(sellerProducts.id, input.afterId)]),
+      ...(input.status ? [eq(sellerProducts.status, input.status)] : []),
+      ...(search ? [ilike(sellerProducts.name, `%${search}%`)] : []),
+    ))
+    .orderBy(desc(sellerProducts.id))
+    .limit(limit + 1);
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit);
+  return { items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
+}
+
+export async function listAuditEventsForAdmin(input: {
+  afterId?: number;
+  limit?: number;
+  eventType?: string;
+} = {}) {
+  const database = await requireDb();
+  const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
+  const rows = await database.select({
+    id: accountAuditEvents.id,
+    eventType: accountAuditEvents.eventType,
+    metadata: accountAuditEvents.metadata,
+    createdAt: accountAuditEvents.createdAt,
+    actorUserId: accountAuditEvents.actorUserId,
+    actorName: users.name,
+    actorEmail: users.email,
+    targetUserId: accountAuditEvents.targetUserId,
+  }).from(accountAuditEvents)
+    .leftJoin(users, eq(users.id, accountAuditEvents.actorUserId))
+    .where(and(
+      ...(input.afterId === undefined ? [] : [lt(accountAuditEvents.id, input.afterId)]),
+      ...(input.eventType ? [eq(accountAuditEvents.eventType, input.eventType)] : []),
+    ))
+    .orderBy(desc(accountAuditEvents.id))
+    .limit(limit + 1);
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit).map(row => ({ ...row, metadata: redactAuditMetadata(row.metadata) }));
   return { items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
 }
 

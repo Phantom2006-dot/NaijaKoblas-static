@@ -1923,3 +1923,47 @@ html:not(.dark) .auth-brand-content > p { color: rgba(245,247,242,.8); }
   .auth-brand-content > p { font-size: 10px; }
   .auth-brand-signature { margin-top: 17px; padding-top: 11px; }
 }
+
+
+.admin-workspace { min-height: 70vh; background: var(--bone-deep); }
+.admin-workspace-inner { width: min(1280px, calc(100% - 64px)); margin: 0 auto; padding: 42px 0 90px; }
+.admin-workspace-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding-bottom: 30px; border-bottom: 1px solid var(--line); }
+.admin-workspace-header h1 { margin: 10px 0 0; color: var(--forest); font-family: Syne, sans-serif; font-size: clamp(36px, 5vw, 64px); letter-spacing: -.07em; line-height: 1; }
+.admin-workspace-header p { max-width: 500px; margin: 14px 0 0; color: var(--muted); }
+.admin-workspace-header .role-badge { display: inline-flex; align-items: center; gap: 6px; }
+.admin-workspace-nav { display: flex; flex-wrap: wrap; gap: 8px; padding: 20px 0 42px; }
+.admin-workspace-nav a { display: inline-flex; align-items: center; gap: 8px; padding: 11px 14px; border: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 700; }
+.admin-workspace-nav a:hover, .admin-workspace-nav a.active { border-color: var(--terracotta); color: var(--forest); background: rgba(198,164,97,.08); }
+.admin-workspace-section .section-heading { align-items: flex-start; }
+.admin-workspace-section .section-heading h2 { max-width: 620px; }
+.admin-filter-bar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; padding: 16px; border: 1px solid var(--line); background: var(--paper); }
+.admin-filter-bar label { display: grid; gap: 6px; min-width: 220px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.admin-filter-bar input, .admin-filter-bar select { height: 42px; padding: 0 11px; border: 1px solid var(--line); outline: none; background: var(--bone); color: var(--forest); }
+.admin-table-wrap { overflow-x: auto; border: 1px solid var(--line); background: var(--paper); }
+.admin-table { width: 100%; border-collapse: collapse; min-width: 920px; }
+.admin-table th { padding: 13px 15px; border-bottom: 1px solid var(--line); color: var(--terracotta); font-size: 10px; letter-spacing: .1em; text-align: left; text-transform: uppercase; }
+.admin-table td { padding: 16px 15px; border-bottom: 1px solid var(--line); color: var(--forest); font-size: 12px; vertical-align: top; }
+.admin-table tr:last-child td { border-bottom: 0; }
+.admin-table td strong, .admin-table td small, .admin-table td span { display: block; }
+.admin-table td strong { font-size: 13px; }
+.admin-table td small { margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.admin-table td span { margin-top: 7px; color: var(--forest); }
+.admin-muted { color: var(--muted) !important; }
+.admin-danger { color: #e28b7c !important; }
+.portal-loading-copy { color: var(--muted); }
+.admin-audit-list { display: grid; gap: 1px; border: 1px solid var(--line); background: var(--line); }
+.admin-audit-row { display: grid; grid-template-columns: 32px 1fr auto; gap: 14px; align-items: start; padding: 18px; background: var(--paper); }
+.admin-audit-marker { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--terracotta); color: var(--terracotta); border-radius: 50%; }
+.admin-audit-row strong { color: var(--forest); font-family: Syne, sans-serif; font-size: 15px; text-transform: capitalize; }
+.admin-audit-row p { margin: 5px 0; color: var(--muted); font-size: 12px; }
+.admin-audit-row small { color: var(--muted); font-size: 10px; }
+.admin-audit-row details { max-width: 300px; color: var(--terracotta); font-size: 11px; }
+.admin-audit-row summary { cursor: pointer; }
+.admin-audit-row pre { max-width: 300px; overflow: auto; margin-top: 8px; padding: 10px; background: var(--bone); color: var(--muted); font-size: 10px; white-space: pre-wrap; }
+@media (max-width: 760px) {
+  .admin-workspace-inner { width: min(100% - 32px, 1280px); padding-top: 28px; }
+  .admin-workspace-header { display: block; }
+  .admin-workspace-header .role-badge { margin-top: 18px; }
+  .admin-audit-row { grid-template-columns: 28px 1fr; }
+  .admin-audit-row details { grid-column: 2; max-width: none; }
+}

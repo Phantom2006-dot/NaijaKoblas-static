@@ -1,10 +1,10 @@
 import { useAuth } from "@clerk/react";
 import { ArrowRight, ShieldCheck } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useAuthRuntime } from "@/_core/auth-runtime";
 import { trpc } from "@/lib/trpc";
 import { NotificationBell } from "@/components/store/NotificationBell";
-import { AdminDashboardPage } from "./AccountPages";
+import { AdminWorkspacePage } from "./AdminWorkspacePage";
 import { StaffProductIntakePanel } from "./StaffProductIntakePanel";
 
 function AdminStatusPage({ title, message, children }: { title: string; message: string; children?: React.ReactNode }) {
@@ -25,6 +25,7 @@ export function AdminAccessPage() {
 }
 
 function ClerkAdminGate() {
+  const [location] = useLocation();
   const runtime = useAuthRuntime();
   const { isLoaded, isSignedIn } = useAuth();
   const account = trpc.auth.me.useQuery(undefined, {
@@ -56,5 +57,5 @@ function ClerkAdminGate() {
       <button className="text-button" disabled={!runtime.signOut} onClick={() => { if (runtime.signOut) void runtime.signOut(); }}>Sign out</button>
     </AdminStatusPage>;
   }
-  return <><div className="admin-entry-topbar"><Link href="/">Return to storefront</Link><div className="admin-entry-actions"><NotificationBell /><button type="button" className="text-button" disabled={!runtime.signOut} onClick={() => { if (runtime.signOut) void runtime.signOut(); }}>Sign out</button></div></div><AdminDashboardPage /><StaffProductIntakePanel /></>;
+  return <><div className="admin-entry-topbar"><Link href="/">Return to storefront</Link><div className="admin-entry-actions"><NotificationBell /><button type="button" className="text-button" disabled={!runtime.signOut} onClick={() => { if (runtime.signOut) void runtime.signOut(); }}>Sign out</button></div></div><AdminWorkspacePage />{location === "/admin" && <StaffProductIntakePanel />}</>;
 }
