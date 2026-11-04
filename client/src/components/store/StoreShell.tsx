@@ -91,9 +91,10 @@ export function Navbar() {
     links.push(["Become a Seller", "/vendor"]);
   }
   links.push(auth.isAuthenticated ? ["Account", "/account"] : ["Sign In", "/login"]);
-  return <header className="site-header">
+  return <header className={`site-header ${open ? "site-header--menu-open" : ""}`}>
     <div className="nav-inner container-wide">
       <BrandMark />
+      <button type="button" className={`mobile-menu-backdrop ${open ? "mobile-menu-backdrop--open" : ""}`} aria-label="Close navigation menu" tabIndex={open ? 0 : -1} onClick={() => { setOpen(false); menuButtonRef.current?.focus(); }} />
       <nav id="primary-navigation" ref={navRef} className={`desktop-nav ${open ? "desktop-nav--open" : ""}`} aria-label="Main navigation">
         {links.map(([label, href]) => <Link key={href} href={href} className={location === href ? "active" : ""} onClick={() => { if (open) menuButtonRef.current?.focus(); setOpen(false); }}>{label}</Link>)}
       </nav>

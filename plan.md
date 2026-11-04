@@ -52,3 +52,10 @@ Phase 1 replaces unconditional seller-acquisition links with a shared effective-
 The first protected admin increment adds a workspace shell with Overview, Catalog and Audit sections. Catalog reads cover all product statuses, seller/store ownership, stock, image count/primary state and timestamps. Audit reads are bounded, admin-only, actor-aware and redact secret-like metadata. Existing overview, payment reconciliation, staff access and staff intake remain protected; staff intake is shown only on Overview.
 
 Future phases add first-class audit targets and product/order/payment events, then Orders, Payments, Sellers, People and Operations sections. Staff queues and seller listing readiness are improved separately without weakening ownership, suspension or payment boundaries. See `ROLE_WORKFLOW_AUDIT.md` and the `audit-*.md` reports for evidence and source references.
+
+
+## Mobile responsive visual pass
+
+Use 42.fr as inspiration for behavior, not branding: mobile-first full-screen navigation, progressive editorial sections, clear statistics blocks, and restrained reveal/slide motion. Keep NaijaKoblas’s forest, bone, terracotta, lime and leather-gold palette, Syne display type and product-first hierarchy.
+
+The implementation will consolidate the final mobile cascade so the header has one predictable breakpoint, the menu animates as a contained full-screen drawer with backdrop and focus behavior, page content cannot create horizontal overflow, product/catalog grids remain tappable, forms and portal rows stack cleanly, and the fixed bottom navigation reserves safe-area space. Add lightweight reveal and hover/tap motion with `prefers-reduced-motion` fallbacks. Do not introduce a new animation library or alter commerce/auth behavior.

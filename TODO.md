@@ -53,3 +53,11 @@
 - [ ] Verify Cloudinary uploads with a real seller listing after the corrected matching Cloudinary credentials; values remain provider-managed and are never stored in Git/chat.
 - [ ] Configure and test Paystack test-mode credentials/webhook before end-to-end checkout reconciliation; seller payouts remain disabled.
 - [ ] Exercise the protected first-admin bootstrap with the intended verified Clerk account and confirm the admin dashboard access.
+
+
+## Phase 5 — mobile responsive visual pass
+- [x] Make the public storefront usable at phone widths without horizontal scrolling: header actions, hero, trust strip, category controls, product cards, spotlight panel, forms, footer and fixed bottom navigation must fit the viewport and respect safe-area padding.
+- [x] Replace conflicting mobile menu overrides with one full-screen contained drawer: clear open/close animation, backdrop, scroll lock, Escape/outside-close, focus return and touch-sized links must remain available for keyboard and touch users.
+- [x] Add restrained 42-inspired editorial motion: section/content reveals and tap/hover feedback, with `prefers-reduced-motion` disabling non-essential movement and preserving readable content.
+- [x] Stack account, seller, staff and admin rows/forms/tables safely on narrow screens while preserving actions, labels, overflow handling and protected workflows.
+- [ ] Validate the mobile build at representative narrow and tablet widths, then push and deploy only after TypeScript, tests, production/static builds and responsive smoke checks pass.
