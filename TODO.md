@@ -3,7 +3,7 @@
 ## Implemented and deployed
 
 - Clerk is the sole end-user identity provider. Email/password, verified primary email, matching frontend/API keys and database-owned customer/seller/staff/admin roles remain the authentication boundary. The application never stores password hashes.
-- Feature code from GitHub commit `f272c56` is included in READY Vercel production. Fly release v10 runs image `marketplace-f272c56` on the existing `naijakoblas-static` app. `/admin` uses the same branded `/login` page as all accounts; only the server-returned Neon `admin` role opens admin tools.
+- Feature code from GitHub commit `70eec80` is included in READY Vercel production. Fly release v11 runs image `ops-70eec80` on the existing `naijakoblas-static` app. `/admin` uses the same branded `/login` page as all accounts; only the server-returned Neon `admin` role opens admin tools.
 - A verified ordinary customer can click “Become a seller” from `/account` or `/vendor` and receive seller access directly, without seller-specific personal/business details or staff approval. The server transaction creates/repairs the approved compatibility record, active store and seller role, and records audit/in-app notifications. Store details remain optional and can be updated later.
 - Seller self-activation cannot replace staff/admin roles or bypass rejected, suspended, inactive-store, missing-store or incomplete seller records. Pending legacy records can be directly activated. The legacy form-submission API is hard-disabled; staff can still review historical records and retain seller suspension/reinstatement controls.
 - Sellers keep one account for shopping and store management. Staff/admin can create seller-owned drafts for active seller stores. The seller must add/select a primary product photo, retain available stock and publish their own listing.
@@ -13,8 +13,8 @@
 
 ## Current live deployment and configuration
 
-- Vercel production for `naijakoblas-static` includes feature commit `f272c56e2809df589dd3154ae27eb1966a46f192` and is READY. The production `/`, `/login`, `/signup`, `/admin`, `/vendor` and `/account` routes returned HTTP 200; its `/api/*` proxy reaches Fly.
-- Fly app `naijakoblas-static` is release v10/image `marketplace-f272c56`, with exactly one `shared-cpu-1x` 512 MB machine in Amsterdam on port 3000. Cloudinary credentials and the protected `OWNER_CLERK_USER_ID` are now configured through Fly Secrets; the Cloudinary connection was verified with a non-secret provider ping. Paystack remains unconfigured and seller payouts remain disabled.
+- Vercel production for `naijakoblas-static` includes feature commit `70eec80e34905894a99dd153c97a7b207012b5e5` and is READY. The production `/`, `/login`, `/signup`, `/admin`, `/vendor` and `/account` routes returned HTTP 200; its `/api/*` proxy reaches Fly.
+- Fly app `naijakoblas-static` is release v11/image `ops-70eec80`, with exactly one `shared-cpu-1x` 512 MB machine in Amsterdam on port 3000. Cloudinary credentials and the protected `OWNER_CLERK_USER_ID` are now configured through Fly Secrets; the Cloudinary connection was verified with a non-secret provider ping. Paystack remains unconfigured and seller payouts remain disabled.
 - The first-admin bootstrap ID was configured from the user-supplied verified Clerk user ID. No password or verification code was created or shared.
 
 ## Completed role audit
@@ -24,16 +24,16 @@
 
 ## Phase 1 — role-aware storefront navigation
 
-- [ ] Replace unconditional `Become a Vendor` and `Get Started` header/footer links with one shared effective-role navigation policy.
-- [ ] Show active sellers `Seller Workspace`, staff `Staff Portal`, and administrators `Admin Portal`; keep sellers’ customer Account and shopping access visible.
-- [ ] Make anonymous and auth-loading states explicit so the navbar does not flash the wrong role or show Account as already available.
-- [ ] Apply the same role-aware behavior to homepage, About and vendor CTAs; reconcile all route manifests, including `/seller-fulfillment`.
+- [x] Replace unconditional `Become a Vendor` and `Get Started` header/footer links with one shared effective-role navigation policy.
+- [x] Show active sellers `Seller Workspace`, staff `Staff Portal`, and administrators `Admin Portal`; keep sellers’ customer Account and shopping access visible.
+- [x] Make anonymous and auth-loading states explicit so the navbar does not flash the wrong role or show Account as already available.
+- [x] Apply the same role-aware behavior to homepage, About and vendor CTAs; reconcile all route manifests, including `/seller-fulfillment`.
 
 ## Phase 2 — protected admin catalog and audit workspace
 
-- [ ] Add admin-only overview counts and a searchable/cursor-paginated catalog ledger covering drafts, published, archived and out-of-stock products, seller/store ownership, image completeness and timestamps.
+- [x] Add admin-only overview counts and a searchable/cursor-paginated catalog ledger covering drafts, published, archived and out-of-stock products, seller/store ownership, image completeness and timestamps.
 - [ ] Add protected product detail with gallery/provider metadata and product activity history; never expose provider secrets.
-- [ ] Add a readable admin audit timeline with actor, event, target, timestamp and redacted metadata.
+- [x] Add a readable admin audit timeline with actor, event, target, timestamp and redacted metadata.
 - [ ] Keep admin staff-role controls explicit and protected; do not add a generic role dropdown or client-controlled actor identity.
 
 ## Phase 3 — operational records and admin sections
