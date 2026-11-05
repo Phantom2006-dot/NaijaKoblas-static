@@ -2126,3 +2126,35 @@ button, a, input, select, textarea { touch-action: manipulation; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* Focused auth finish: keep login calm and branded instead of treating it like another storefront page. */
+body:has(.naija-auth-page) .site-header .desktop-nav,
+body:has(.naija-auth-page) .site-header .nav-actions,
+body:has(.naija-auth-page) .mobile-bottom-nav { display: none; }
+body:has(.naija-auth-page) .site-header .nav-inner { justify-content: center; }
+body:has(.naija-auth-page) .site-header .brand-mark { margin-left: 0; }
+.naija-auth-page { min-height: calc(100svh - 68px); background: radial-gradient(circle at 12% 8%, rgba(32, 160, 82, .1), transparent 28%), var(--ref-bg); }
+.naija-auth-page .auth-reference-layout { grid-template-columns: minmax(0, 500px) minmax(360px, 430px); align-items: center; gap: clamp(34px, 6vw, 86px); min-height: calc(100svh - 68px); padding-top: 42px; padding-bottom: 54px; }
+.naija-auth-page .clerk-auth-card { align-self: center; padding: clamp(34px, 4vw, 52px); border-top-width: 4px; box-shadow: 0 30px 90px rgba(6, 28, 13, .16); }
+.naija-auth-page .auth-form-intro h1 { font-size: clamp(32px, 3.4vw, 43px); line-height: .98; }
+.naija-auth-page .auth-form-intro p, .naija-auth-page .clerk-auth-card .auth-page-message { font-size: 13px; line-height: 1.7; }
+.naija-auth-page .clerk-auth-widget { margin-top: 16px; }
+.naija-auth-page .auth-brand-panel { align-self: center; min-height: 600px; height: min(68svh, 660px); box-shadow: 0 30px 90px rgba(6, 28, 13, .22); }
+.naija-auth-page .auth-brand-content { padding: clamp(26px, 3vw, 38px); }
+.naija-auth-page .auth-brand-panel .auth-brand-content h2 { font-size: clamp(31px, 3.6vw, 43px); }
+.naija-auth-page .auth-brand-signature { margin-top: 30px; }
+@media (max-width: 960px) {
+  .naija-auth-page .auth-reference-layout { width: min(570px, calc(100% - 40px)); grid-template-columns: 1fr; gap: 20px; }
+  .naija-auth-page .auth-brand-panel { min-height: 300px; height: 300px; }
+}
+@media (max-width: 640px) {
+  body:has(.naija-auth-page) .site-header .nav-inner { min-height: 62px; }
+  .naija-auth-page { min-height: calc(100svh - 62px); }
+  .naija-auth-page .auth-reference-layout { width: calc(100% - 24px); min-height: 0; padding-top: 18px; padding-bottom: 28px; }
+  .naija-auth-page .clerk-auth-card { padding: 28px 20px 25px; }
+  .naija-auth-page .auth-form-intro h1 { font-size: 31px; }
+  .naija-auth-page .auth-form-intro p, .naija-auth-page .clerk-auth-card .auth-page-message { font-size: 12px; }
+  .naija-auth-page .auth-brand-panel { min-height: 235px; height: 235px; }
+  .naija-auth-page .auth-brand-content { padding: 22px; }
+  .naija-auth-page .auth-brand-panel .auth-brand-content h2 { font-size: 27px; }
+}
