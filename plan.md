@@ -59,3 +59,37 @@ Future phases add first-class audit targets and product/order/payment events, th
 Use 42.fr as inspiration for behavior, not branding: mobile-first full-screen navigation, progressive editorial sections, clear statistics blocks, and restrained reveal/slide motion. Keep NaijaKoblas’s forest, bone, terracotta, lime and leather-gold palette, Syne display type and product-first hierarchy.
 
 The implementation will consolidate the final mobile cascade so the header has one predictable breakpoint, the menu animates as a contained full-screen drawer with backdrop and focus behavior, page content cannot create horizontal overflow, product/catalog grids remain tappable, forms and portal rows stack cleanly, and the fixed bottom navigation reserves safe-area space. Add lightweight reveal and hover/tap motion with `prefers-reduced-motion` fallbacks. Do not introduce a new animation library or alter commerce/auth behavior.
+
+## November 2026 functional e-commerce upgrade
+
+Continue this repository in verified phases, not a replacement website. GitHub review branch delivery is the current execution path because the saved Webdev identity is unavailable to this session. Do not deploy or modify Neon during development. The existing Clerk provider, verified-email checks, database-owned roles, Vercel/Fly split, Cloudinary endpoint, Paystack verification and seller ownership remain in place.
+
+### Phase 1 — baseline and backend contracts
+
+Establish the untouched TypeScript/test/build baseline, then extend the existing tRPC/Drizzle architecture through focused `server/admin` modules. Add admin-authorized product detail, filtered/sorted/paginated product management, seller-owned draft creation, real database edits, safe deletion for products without order history, archive for historical products, primary-photo selection and gallery removal. Keep stock reservation protections, immutable ownership and seller-controlled publication. Add actual database overview/sales aggregates, bounded order/customer records and paid-order fulfillment transitions, preserving payment-provider verification and not inventing refund/cancellation behavior. Category management uses categories already stored on product records rather than a new taxonomy schema.
+
+### Phase 2 — functional admin workflows
+
+Replace the unfinished operations surface with a responsive forest-and-bone administration shell, sidebar and contextual topbar, retaining the existing admin gate, notifications and Clerk logout. Connect forms/tables to phase-1 procedures with validation, save/cancel, confirmation dialogs, pagination, image previews and explicit server errors. Overview and Analytics show real counts, paid revenue and zero/empty states; Orders and Customers expose real records; Settings shows provider readiness without secrets. Preserve account-role controls, payment reconciliation, staff intake and audit access.
+
+### Phase 3 — public storefront and honest contact/subscriptions
+
+Reuse the existing product photography, logos, Syne typography and forest/bone/terracotta/lime palette. Improve catalog search/category/price sorting and loading/empty states, remove the implicit price ceiling, refresh the shared catalog after admin saves and on visitor refocus, and keep checkout/wishlist/cart behavior. Improve editorial Home/About hierarchy and factual brand copy. Replace contact/newsletter fake-success handlers with durable Postgres submission storage, validated tRPC endpoints, abuse limits and admin inbox access; any new tables must use reviewed Postgres migrations through the existing custom runner. Success means stored for administration, not an email that was never sent. Do not make unsupported shipping, return, verification or response-time promises. Restrained CSS micro-interactions and reduced-motion support require no new animation dependency.
+
+### Phase 4 — final regression audit and handoff
+
+Run the existing suite plus new admin/public behavior tests, production/static builds, local disposable-Postgres persistence and migration checks, and a read-only independent wiring/security audit. Record the result of each phase in `verification/PHASES.md`; do not advance past confirmed failures. Add deployment instructions and clearly distinguish code/local database proof from authenticated live Clerk/Cloudinary/Paystack tests that cannot be performed without controlled live access. Push verified commits to a new GitHub branch and open a pull request; do not silently update production.
+
+### Project structure and integration
+
+- `client/src/pages/admin`: focused admin overview/catalog/editor/order/customer/analytics/settings views.
+- `client/src/pages/AdminWorkspacePage.tsx`: admin shell and section routing; `AdminAccessPage.tsx` retains the authentication/authorization gate.
+- `client/src/components/store`: existing storefront cards, notifications and image upload component, extended without duplicated providers.
+- `server/admin`: new protected product and operations modules composed into `server/routers.ts`; `server/db.ts` remains the shared connection and existing commerce data layer.
+- `shared`: browser/server-safe validation and catalog utilities where genuinely shared.
+- `drizzle/schema.ts` / `drizzle/postgres`: only necessary durable contact/subscription additions; no replacement product/order/auth schema.
+- `scripts` / `server/**/*.test.ts` / `verification`: reproducible localhost-only persistence checks and phase evidence.
+
+### Design continuation
+
+Keep NaijaKoblas's Nigerian leather-craft identity. Admin: quiet bone surfaces, forest sidebar, lime accents only for key actions, Syne headings, compact readable tables and generous form labels. Public: asymmetric editorial hero, original product imagery, premium craft story and clear shopping CTAs. Motion remains short opacity/transform feedback, never essential to comprehension, with visible focus states and reduced-motion overrides. No decorative dashboard illustrations or fabricated statistics.

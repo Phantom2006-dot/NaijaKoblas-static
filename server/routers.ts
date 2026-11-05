@@ -10,6 +10,8 @@ import * as db from "./db";
 import { initializePaystackCheckout, verifyPaystackTransaction } from "./payments/paystack";
 import { classifyPaystackTransaction } from "./payments/reconciliation";
 import { productStatuses } from "../drizzle/schema";
+import { adminProductManagementRouter } from "./admin/products";
+import { adminOperationsRouter } from "./admin/operations";
 
 const reviewInput = z.object({
   applicationId: z.number().int().positive(),
@@ -327,6 +329,8 @@ export const appRouter = router({
   }),
 
   admin: router({
+    productManagement: adminProductManagementRouter,
+    operations: adminOperationsRouter,
     users: adminProcedure.query(() => db.listUsersForAdmin()),
     products: adminProcedure.input(z.object({
       afterId: z.string().min(1).max(64).optional(),

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -9,9 +10,14 @@ import { StoreShell } from "./components/store/StoreShell";
 import { AboutPage, CartPage, CheckoutPage, ContactPage, HomePage, InfoPage, OrderConfirmationPage, ProductDetailPage, ProductsPage, VendorPage, WaitlistPage } from "./pages/StorePages";
 import { AccountPage, SuspendedSellerFulfillmentPage } from "./pages/AccountPages";
 import { AuthPage } from "./pages/AuthPage";
-import { AdminAccessPage } from "./pages/AdminAccessPage";
 import { SellerWorkspacePage } from "./pages/SellerWorkspacePage";
 import { StaffWorkspacePage } from "./pages/StaffWorkspacePage";
+
+const AdminAccessPage = lazy(() => import("./pages/AdminAccessPage").then(module => ({ default: module.AdminAccessPage })));
+
+function AdminRoute() {
+  return <Suspense fallback={<main className="admin-route-loading" role="status">Loading secure administrator portal…</main>}><AdminAccessPage /></Suspense>;
+}
 
 function Router() {
   const [location] = useLocation();
@@ -32,8 +38,8 @@ function Router() {
     <Route path="/seller-fulfillment" component={SuspendedSellerFulfillmentPage} />
     <Route path="/seller" component={SellerWorkspacePage} />
     <Route path="/staff" component={StaffWorkspacePage} />
-    <Route path="/admin/:section" component={AdminAccessPage} />
-    <Route path="/admin" component={AdminAccessPage} />
+    <Route path="/admin/:section" component={AdminRoute} />
+    <Route path="/admin" component={AdminRoute} />
     <Route path="/info/:topic" component={InfoPage} />
     <Route path="/404" component={NotFound} />
     <Route component={NotFound} />
