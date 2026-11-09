@@ -78,3 +78,9 @@
 - [ ] **Consistent polish/accessibility/performance.** Modern reusable buttons, cards, spacing, typography and palette; tasteful hover/modal/loading transitions; reduced-motion support; loading skeletons; no unnecessary dependencies, route changes, major console/type/build errors or performance regressions. Keep good public page metadata/SEO.
 - [ ] **Verified phased delivery.** Confirm baseline first, verify backend contracts before admin UI, verify admin before public improvements, fix confirmed issues before advancing. Prove create/edit/public reflection/delete/history/image selection/order boundaries with a disposable localhost database and preserve existing automated tests. Clearly separate local proof from live-account/provider tests not performed.
 - [ ] **Documented review handoff.** Summarize changed features, backend/schema changes, dependencies, missing features/reasons, environment variables and deployment steps. Provide a verified GitHub review branch/pull request, without automatically mutating production or enabling live payments.
+
+## November 2026 continuation checkpoint (2026-11-09)
+
+The first public slice is complete: durable contact messages and newsletter/waitlist subscriptions use reviewed migration `0003_honest_contacts`; public forms use validated server persistence with process-local abuse limits; duplicate subscription emails are normalized; administrators can search and update the protected contact inbox; catalog refreshes on focus/visibility; and the fixed ₦200,000 price ceiling is gone. About, shipping and returns copy was also revised to avoid promises the current system cannot guarantee.
+
+Verification passed TypeScript, 106 unit tests, production and static builds, all three disposable localhost persistence suites with migrations applied twice, and `git diff --check`. Remaining work is the final independent wiring/security audit and any additional public editorial polish before Phase 4 handoff.

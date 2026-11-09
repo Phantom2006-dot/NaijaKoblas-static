@@ -12,6 +12,7 @@ import { classifyPaystackTransaction } from "./payments/reconciliation";
 import { productStatuses } from "../drizzle/schema";
 import { adminProductManagementRouter } from "./admin/products";
 import { adminOperationsRouter } from "./admin/operations";
+import { adminSubmissionsRouter, publicSubmissionsRouter } from "./publicSubmissions";
 
 const reviewInput = z.object({
   applicationId: z.number().int().positive(),
@@ -84,6 +85,8 @@ export const appRouter = router({
   catalog: router({
     list: publicProcedure.query(() => db.listPublicSellerProducts()),
   }),
+
+  submissions: publicSubmissionsRouter,
 
   account: router({
     me: protectedProcedure.query(async ({ ctx }) => {
@@ -331,6 +334,7 @@ export const appRouter = router({
   admin: router({
     productManagement: adminProductManagementRouter,
     operations: adminOperationsRouter,
+    submissions: adminSubmissionsRouter,
     users: adminProcedure.query(() => db.listUsersForAdmin()),
     products: adminProcedure.input(z.object({
       afterId: z.string().min(1).max(64).optional(),

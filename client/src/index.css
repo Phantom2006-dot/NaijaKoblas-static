@@ -2404,3 +2404,13 @@ body:has(.naija-auth-page) .site-header .brand-mark { margin-left: 0; }
 @media (prefers-reduced-motion: reduce) {
   .admin-workspace-nav a { transition: none; }
 }
+.admin-contact-list { display: grid; gap: 12px; }
+.admin-contact-card { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(240px, 1.5fr) 150px; gap: 18px; align-items: start; padding: 18px; border: 1px solid var(--line); background: var(--paper); }
+.admin-contact-card h3 { margin: 9px 0 5px; color: var(--forest); font: 700 16px/1.2 Syne, sans-serif; }
+.admin-contact-card p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.admin-contact-card small { display: block; margin-top: 7px; color: var(--muted); font-size: 9px; }
+.admin-contact-card a { color: var(--terracotta); }
+.admin-contact-message { color: var(--forest) !important; white-space: pre-wrap; }
+.admin-contact-actions label { display: grid; gap: 6px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.admin-contact-actions select { min-height: 38px; padding: 8px; border: 1px solid var(--line); background: var(--bone); color: var(--forest); font-size: 10px; }
+@media (max-width: 760px) { .admin-contact-card { grid-template-columns: 1fr; gap: 12px; } .admin-contact-actions select { width: 100%; } }
