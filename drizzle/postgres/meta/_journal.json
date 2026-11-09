@@ -22,6 +22,13 @@
       "when": 1793466169577,
       "tag": "0002_aspiring_iceman",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794194323398,
+      "tag": "0003_honest_contacts",
+      "breakpoints": true
     }
   ]
 }

@@ -31,6 +31,8 @@ export const orderItemStatusEnum = pgEnum("order_item_status", orderItemStatuses
 export const paymentStatusEnum = pgEnum("payment_status", paymentStatuses);
 export const deliveryMethodEnum = pgEnum("delivery_method", deliveryMethods);
 export const paymentProviderEnum = pgEnum("payment_provider", ["paystack"]);
+export const contactMessageStatuses = ["new", "in_progress", "resolved"] as const;
+export const contactMessageStatusEnum = pgEnum("contact_message_status", contactMessageStatuses);
 
 const createdAt = () => timestamp("createdAt", { withTimezone: true, mode: "date" }).defaultNow().notNull();
 const updatedAt = () => timestamp("updatedAt", { withTimezone: true, mode: "date" }).defaultNow().notNull();
@@ -255,6 +257,34 @@ export const paymentTransactions = pgTable("paymentTransactions", {
   ngnCurrency: check("paymentTransactions_ngn_currency", sql`${table.currency} = 'NGN'`),
 }));
 
+/** Public support messages are durable inbox records; no email delivery is implied. */
+export const contactMessages = pgTable("contactMessages", {
+  id: serial("id").primaryKey(),
+  firstName: varchar("firstName", { length: 100 }).notNull(),
+  lastName: varchar("lastName", { length: 100 }).notNull(),
+  email: varchar("email", { length: 320 }).notNull(),
+  subject: varchar("subject", { length: 180 }).notNull(),
+  message: text("message").notNull(),
+  status: contactMessageStatusEnum("status").default("new").notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, table => ({
+  statusCreatedIdx: index("contactMessages_status_createdAt_idx").on(table.status, table.createdAt),
+  emailCreatedIdx: index("contactMessages_email_createdAt_idx").on(table.email, table.createdAt),
+}));
+
+/** Newsletter/waitlist subscriptions are stored for review; campaigns and delivery are not implemented. */
+export const newsletterSubscriptions = pgTable("newsletterSubscriptions", {
+  id: serial("id").primaryKey(),
+  email: varchar("email", { length: 320 }).notNull(),
+  source: varchar("source", { length: 32 }).default("newsletter").notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, table => ({
+  emailUnique: uniqueIndex("newsletterSubscriptions_email_unique").on(table.email),
+  createdAtIdx: index("newsletterSubscriptions_createdAt_idx").on(table.createdAt),
+}));
+
 export type AccountRole = (typeof accountRoles)[number];
 export type SellerApplicationStatus = (typeof sellerApplicationStatuses)[number];
 export type ProductStatus = (typeof productStatuses)[number];
@@ -275,3 +305,5 @@ export type SellerProductImageFormat = (typeof sellerProductImageFormats)[number
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type PaymentTransaction = typeof paymentTransactions.$inferSelect;
+export type ContactMessage = typeof contactMessages.$inferSelect;
+export type NewsletterSubscription = typeof newsletterSubscriptions.$inferSelect;

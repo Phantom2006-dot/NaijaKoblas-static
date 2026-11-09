@@ -1,10 +1,11 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
 import {
   Activity,
   BarChart3,
   Boxes,
   CreditCard,
   LayoutDashboard,
+  Mail,
   Settings,
   ShieldCheck,
   Tags,
@@ -31,6 +32,7 @@ const sections = [
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
   { label: "Settings", href: "/admin/settings", icon: Settings },
   { label: "Audit log", href: "/admin/audit", icon: Activity },
+  { label: "Contact inbox", href: "/admin/contact", icon: Mail },
   { label: "Access & payments", href: "/admin/operations", icon: ShieldCheck },
 ] as const;
 
@@ -91,6 +93,15 @@ function AdminAuditPage() {
   return <section className="admin-workspace-section"><div className="section-heading"><div><span className="eyebrow">Append-only activity</span><h2>Audit log</h2><p>Protected business events recorded by the server, with actor and target references where available.</p></div><button className="button button--outline" type="button" onClick={() => void audit.refetch()} disabled={audit.isFetching}>Refresh</button></div>{audit.isLoading ? <p className="portal-loading-copy">Loading audit events…</p> : audit.error ? <p className="portal-error">Audit events are temporarily unavailable.</p> : audit.data?.items.length ? <div className="admin-audit-list">{audit.data.items.map(event => <article className="admin-audit-row" key={event.id}><div className="admin-audit-marker"><Activity size={15} /></div><div><strong>{event.eventType.replaceAll("_", " ")}</strong><p>{event.actorName ?? event.actorEmail ?? (event.actorUserId ? `Account #${event.actorUserId}` : "System event")} {event.targetUserId ? `· target account #${event.targetUserId}` : ""}</p><small>{formatDate(event.createdAt)} · Event #{event.id}</small></div><details><summary>Metadata</summary><pre>{JSON.stringify(event.metadata ?? {}, null, 2)}</pre></details></article>)}</div> : <AdminEmpty title="No audit events yet" copy="Marketplace actions will appear here as the service records them." />}</section>;
 }
 
+function AdminContactInboxPage() {
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<"all" | "new" | "in_progress" | "resolved">("new");
+  const [offset, setOffset] = useState(0);
+  const query = trpc.admin.submissions.contactMessages.useQuery({ search: search || undefined, status: status === "all" ? undefined : status, limit: 25, offset }, { retry: false });
+  const update = trpc.admin.submissions.updateContactStatus.useMutation({ onSuccess: () => void query.refetch() });
+  return <section className="admin-workspace-section"><div className="section-heading"><div><span className="eyebrow">Stored public submissions</span><h2>Contact inbox</h2><p>Messages are stored for review. This workspace does not claim that an email was sent or that a response-time promise exists.</p></div><button className="button button--outline" type="button" onClick={() => void query.refetch()} disabled={query.isFetching}>Refresh</button></div><div className="admin-filter-bar"><label>Search<input value={search} onChange={event => { setSearch(event.target.value); setOffset(0); }} placeholder="Email, subject or message" /></label><label>Status<select value={status} onChange={event => { setStatus(event.target.value as typeof status); setOffset(0); }}><option value="new">New</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="all">All statuses</option></select></label></div>{query.isLoading ? <p className="portal-loading-copy">Loading stored messages…</p> : query.error ? <p className="portal-error">The contact inbox is temporarily unavailable.</p> : query.data?.items.length ? <div className="admin-contact-list">{query.data.items.map(message => <article className="admin-contact-card" key={message.id}><div><span className={`status-label status-label--${message.status}`}>{message.status.replaceAll("_", " ")}</span><h3>{message.subject}</h3><p>{message.firstName} {message.lastName} · <a href={`mailto:${message.email}`}>{message.email}</a></p><small>{formatDate(message.createdAt)}</small></div><p className="admin-contact-message">{message.message}</p><div className="admin-contact-actions"><label>Update status<select value={message.status} disabled={update.isPending} onChange={event => update.mutate({ id: message.id, status: event.target.value as "new" | "in_progress" | "resolved" })}><option value="new">New</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option></select></label></div></article>)}</div> : <AdminEmpty title="No stored messages" copy="New contact submissions will appear here after validation and abuse checks." />} {query.data && <div className="admin-products-pagination"><span>Showing {query.data.items.length} of {query.data.total}</span><div><button type="button" className="button button--outline" disabled={offset === 0 || query.isFetching} onClick={() => setOffset(value => Math.max(0, value - 25))}>Previous</button><button type="button" className="button button--outline" disabled={offset + query.data.items.length >= query.data.total || query.isFetching} onClick={() => setOffset(value => value + 25)}>Next</button></div></div>}{update.error && <p className="portal-error" role="alert">{update.error.message}</p>}</section>;
+}
+
 export function AdminWorkspacePage() {
   const [location] = useLocation();
   const path = location.split("?")[0];
@@ -102,6 +113,7 @@ export function AdminWorkspacePage() {
   else if (path === "/admin/analytics") section = <AdminAnalyticsPage />;
   else if (path === "/admin/settings") section = <AdminSettingsPage />;
   else if (path === "/admin/audit") section = <AdminAuditPage />;
+  else if (path === "/admin/contact") section = <AdminContactInboxPage />;
   else if (path === "/admin/operations") section = <AdminDashboardPage />;
   else section = <AdminOverviewPage />;
   return <AdminSectionShell>{section}</AdminSectionShell>;

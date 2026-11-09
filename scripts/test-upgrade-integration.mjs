@@ -18,7 +18,7 @@ assert.ok(["postgres:", "postgresql:"].includes(url.protocol), "Expected Postgre
 const suites = {
   products: "server/admin/products.integration.ts",
   operations: "server/admin/operations.integration.ts",
-  public: "server/engagement/engagement.integration.ts",
+  submissions: "server/publicSubmissions.integration.ts",
 };
 const selected = process.argv.slice(2);
 const names = selected.length ? selected : Object.keys(suites);

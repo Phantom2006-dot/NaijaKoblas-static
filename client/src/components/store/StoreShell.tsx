@@ -5,6 +5,7 @@ import { useStore, type Product, money } from "@/store";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { NotificationBell } from "./NotificationBell";
+import { trpc } from "@/lib/trpc";
 
 export function BrandMark({ light = false }: { light?: boolean }) {
   const { theme } = useTheme();
@@ -113,14 +114,15 @@ export function Navbar() {
 
 export function Footer() {
   const [email, setEmail] = useState("");
-  const [submitted, setSubmitted] = useState(false);
+  const subscribe = trpc.submissions.subscribe.useMutation();
   const auth = useAuth();
   return <footer className="site-footer">
     <div className="container-wide footer-newsletter">
       <div className="footer-newsletter-copy"><span className="eyebrow eyebrow--light">Stay connected</span><h2>Stay close to the craft.</h2><p>New collections, artisan stories, and early access — thoughtfully delivered.</p></div>
-      <form className="newsletter-form" onSubmit={(event) => { event.preventDefault(); if (email) setSubmitted(true); }}>
+      <form className="newsletter-form" onSubmit={(event) => { event.preventDefault(); subscribe.mutate({ email, source: "newsletter" }); }}>
         <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Your email address" aria-label="Your email address" />
-        <button className="button button--lime" type="submit">{submitted ? "Subscribed" : "Subscribe"}<ArrowRight size={17} /></button>
+        <button className="button button--lime" type="submit" disabled={subscribe.isPending}>{subscribe.isSuccess ? "Stored" : subscribe.isPending ? "Saving…" : "Subscribe"}<ArrowRight size={17} /></button>
+        {subscribe.error && <small className="form-error" role="status">{subscribe.error.message}</small>}
       </form>
     </div>
     <div className="container-wide footer-main">

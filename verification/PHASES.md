@@ -16,14 +16,16 @@ Composed both new routers under the existing `adminProcedure`-protected `admin` 
 
 Evidence: `verification/phase1.log`; `server/admin/products.integration.ts`; `server/admin/operations.integration.ts`.
 
-## Phase 2 — admin workflows (IN PROGRESS)
+## Phase 2 — admin workflows — PASS (2026-11-05)
 
 Starts from a fully verified backend. Implement the protected responsive admin shell, product editor/management, real overview/sales charts, orders, customers, categories and provider settings, keeping the existing account-role controls/reconciliation/staff intake/audit accessible. Verify UI typecheck/build/routes and repeat actual product/order persistence after integration.
 
-## Phase 3 — public/contact/subscription improvements (NOT STARTED)
+The protected admin shell, catalog editor, operations pages and route manifests are implemented. The Phase 2 gate passed `pnpm check`, all 106 unit tests, full and static production builds, both disposable product/operations persistence suites, and `git diff --check`. Build warnings remain limited to the intentional runtime platform-config script and the existing large frontend chunk.
 
-Starts only after Phase 2 checks pass.
+## Phase 3 — public/contact/subscription improvements — SLICE PASS (2026-11-09)
 
-## Phase 4 — final audit and handoff (NOT STARTED)
+The first public slice is verified: catalog data refreshes on window focus/visibility, the public price filter no longer caps listings at ₦200,000, newsletter/waitlist/contact submissions use validated tRPC procedures with process-local abuse limits, contact messages and subscriptions persist through reviewed migration `0003_honest_contacts`, duplicate subscription emails are normalized/deduplicated, and administrators can search and update the protected contact inbox. The new disposable submissions suite passed after applying migrations twice and verified contact persistence, subscription deduplication, inbox search and status updates. The complete editorial Home/About rewrite and any additional public polish remain open; Phase 4 cannot start yet.
+
+## Phase 4 — final regression audit and handoff (NOT STARTED)
 
 Starts only after Phase 3 checks pass. A code/local database check is not a live Clerk login, Cloudinary upload, or Paystack transaction test; these require controlled real credentials and are recorded separately.

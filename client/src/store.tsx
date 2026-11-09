@@ -190,7 +190,7 @@ type StoreContextValue = {
 const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const catalogQuery = trpc.catalog.list.useQuery(undefined, { retry: false });
+  const catalogQuery = trpc.catalog.list.useQuery(undefined, { retry: false, refetchOnWindowFocus: true });
   const catalogProducts = useMemo<Product[]>(() => (catalogQuery.data ?? []).map(product => {
     const images = [...new Set([product.imageUrl, ...(product.images ?? [])].filter((image): image is string => Boolean(image)))];
     return {
@@ -221,6 +221,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   });
   useEffect(() => localStorage.setItem("koblas-cart", JSON.stringify(cart)), [cart]);
   useEffect(() => localStorage.setItem("koblas-wishlist", JSON.stringify(wishlist)), [wishlist]);
+  useEffect(() => {
+    const refresh = () => { void catalogQuery.refetch(); };
+    window.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [catalogQuery.refetch]);
 
   const cartCount = cart.reduce((sum, line) => sum + line.quantity, 0);
   const subtotal = cart.reduce((sum, line) => sum + (catalogProducts.find((item) => item.id === line.productId)?.price ?? 0) * line.quantity, 0);
